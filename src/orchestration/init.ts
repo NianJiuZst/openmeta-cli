@@ -7,43 +7,52 @@ interface LLMProviderOption {
   name: string;
   value: string;
   baseUrl: string;
-}
-
-interface LLMModelOption {
-  name: string;
-  value: string;
+  models: Array<{ name: string; value: string }>;
 }
 
 const LLM_PROVIDERS: LLMProviderOption[] = [
-  { name: 'OpenAI', value: 'openai', baseUrl: 'https://api.openai.com/v1' },
-  { name: 'MiniMax (OpenAI-compatible)', value: 'minimax', baseUrl: 'https://api.minimaxi.com/v1' },
-  { name: 'SiliconFlow (国内可用)', value: 'siliconflow', baseUrl: 'https://api.siliconflow.cn/v1' },
-  { name: 'Groq (免费额度)', value: 'groq', baseUrl: 'https://api.groq.com/openai/v1' },
+  {
+    name: 'OpenAI',
+    value: 'openai',
+    baseUrl: 'https://api.openai.com/v1',
+    models: [
+      { name: 'GPT-4o-mini (推荐)', value: 'gpt-4o-mini' },
+      { name: 'GPT-4o', value: 'gpt-4o' },
+      { name: 'GPT-4-turbo', value: 'gpt-4-turbo' },
+    ],
+  },
+  {
+    name: 'MiniMax (OpenAI兼容)',
+    value: 'minimax',
+    baseUrl: 'https://api.minimaxi.com/v1',
+    models: [
+      { name: 'MiniMax-M2.7 (最新)', value: 'MiniMax-M2.7' },
+      { name: 'MiniMax-M2.5', value: 'MiniMax-M2.5' },
+      { name: 'MiniMax-M2.1', value: 'MiniMax-M2.1' },
+      { name: 'MiniMax-M2', value: 'MiniMax-M2' },
+    ],
+  },
+  {
+    name: 'SiliconFlow (国内可用)',
+    value: 'siliconflow',
+    baseUrl: 'https://api.siliconflow.cn/v1',
+    models: [
+      { name: 'Qwen/Qwen2.5-72B-Instruct', value: 'Qwen/Qwen2.5-72B-Instruct' },
+      { name: 'deepseek-ai/DeepSeek-V2.5', value: 'deepseek-ai/DeepSeek-V2.5' },
+      { name: 'THUDM/glm-4-9b-chat', value: 'THUDM/glm-4-9b-chat' },
+    ],
+  },
+  {
+    name: 'Groq (免费额度)',
+    value: 'groq',
+    baseUrl: 'https://api.groq.com/openai/v1',
+    models: [
+      { name: 'llama-3.1-70b-versatile', value: 'llama-3.1-70b-versatile' },
+      { name: 'mixtral-8x7b-32768', value: 'mixtral-8x7b-32768' },
+      { name: 'llama3-70b-8192', value: 'llama3-70b-8192' },
+    ],
+  },
 ];
-
-const MODELS_BY_PROVIDER: Record<string, LLMModelOption[]> = {
-  openai: [
-    { name: 'GPT-4o-mini (推荐)', value: 'gpt-4o-mini' },
-    { name: 'GPT-4o', value: 'gpt-4o' },
-    { name: 'GPT-4-turbo', value: 'gpt-4-turbo' },
-  ],
-  minimax: [
-    { name: 'MiniMax-M2.7 (最新)', value: 'MiniMax-M2.7' },
-    { name: 'MiniMax-M2.5', value: 'MiniMax-M2.5' },
-    { name: 'MiniMax-M2.1', value: 'MiniMax-M2.1' },
-    { name: 'MiniMax-M2', value: 'MiniMax-M2' },
-  ],
-  siliconflow: [
-    { name: 'Qwen/Qwen2.5-72B-Instruct', value: 'Qwen/Qwen2.5-72B-Instruct' },
-    { name: 'deepseek-ai/DeepSeek-V2.5', value: 'deepseek-ai/DeepSeek-V2.5' },
-    { name: 'THUDM/glm-4-9b-chat', value: 'THUDM/glm-4-9b-chat' },
-  ],
-  groq: [
-    { name: 'llama-3.1-70b-versatile', value: 'llama-3.1-70b-versatile' },
-    { name: 'mixtral-8x7b-32768', value: 'mixtral-8x7b-32768' },
-    { name: 'llama3-70b-8192', value: 'llama3-70b-8192' },
-  ],
-};
 
 export class InitOrchestrator {
   async execute(): Promise<void> {
@@ -82,30 +91,51 @@ export class InitOrchestrator {
 
     console.log('\n=== Step 2: LLM API Configuration ===\n');
 
+    // Step 2a: Select provider
+    const providerChoices = LLM_PROVIDERS.map(p => ({
+      name: p.name,
+      value: p.value,
+    }));
+
     const { providerValue } = await inquirer.prompt<{ providerValue: string }>([
       {
         type: 'list',
         name: 'providerValue',
         message: 'Select LLM provider:',
-        choices: LLM_PROVIDERS.map(p => ({ name: p.name, value: p.value })),
+        choices: providerChoices,
       },
     ]);
 
-    const provider = LLM_PROVIDERS.find(p => p.value === providerValue)!;
-    const models = MODELS_BY_PROVIDER[providerValue] || [];
+    // Find the selected provider
+    const selectedProvider = LLM_PROVIDERS.find(p => p.value === providerValue);
+    if (!selectedProvider) {
+      throw new Error(`Provider not found: ${providerValue}`);
+    }
+
+    console.log(`Selected provider: ${selectedProvider.name}`);
+
+    // Step 2b: Select model
+    const modelChoices = selectedProvider.models.map(m => ({
+      name: m.name,
+      value: m.value,
+    }));
 
     const { modelValue } = await inquirer.prompt<{ modelValue: string }>([
       {
         type: 'list',
         name: 'modelValue',
         message: 'Select model:',
-        choices: models.map(m => ({ name: m.name, value: m.value })),
+        choices: modelChoices,
       },
     ]);
 
+    console.log(`Selected model: ${modelValue}`);
+
+    // Step 2c: Enter API key
     const apiKey = await this.promptAPIKey();
 
-    llmService.initialize(apiKey, provider.baseUrl, modelValue);
+    // Step 2d: Validate connection
+    llmService.initialize(apiKey, selectedProvider.baseUrl, modelValue);
     const llmValid = await llmService.validateConnection();
     if (!llmValid) {
       console.log('\n❌ LLM API connection failed. Please check your API key.\n');
@@ -189,7 +219,7 @@ export class InitOrchestrator {
       },
       llm: {
         provider: providerValue as 'openai' | 'minimax',
-        apiBaseUrl: provider.baseUrl,
+        apiBaseUrl: selectedProvider.baseUrl,
         apiKey,
         modelName: modelValue,
       },
