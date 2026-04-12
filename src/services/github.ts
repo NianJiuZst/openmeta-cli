@@ -37,13 +37,16 @@ export class GitHubService {
     const issues: GitHubIssue[] = [];
 
     try {
-      const searchQuery = FILTER_LABELS.map(label => `label:"${label}"`).join(' OR ') + ' is:issue is:open';
+      // Simple search - just try "good first issue" label first
+      const searchQuery = 'label:"good first issue" is:issue is:open';
       const response = await this.octokit.rest.search.issuesAndPullRequests({
         q: searchQuery,
         sort: 'updated',
         per_page: 100,
-        type: 'issue',
       });
+
+      logger.debug(`Search query: ${searchQuery}`);
+      logger.debug(`Total results: ${response.data.total_count}`);
 
       for (const item of response.data.items) {
         if (item.pull_request) continue;

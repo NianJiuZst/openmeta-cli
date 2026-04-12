@@ -2,11 +2,20 @@ export const ISSUE_MATCH_PROMPT = `You are a professional open source contributi
 
 User Tech Profile: {{userProfile}}
 
+Output format - STRICTLY follow this format for EACH issue:
+#{issue_number} [SCORE: 0-100]
+Core Demand: [one sentence]
+Tech Requirements: [comma separated list]
+Estimated Workload: [e.g., 1-2 hours]
+
 Requirements:
-1. Score each issue 0-100 based on: tech stack match, difficulty match, focus area match;
-2. Standardize analysis for each issue: project background, core demand, tech requirements, solution hints, estimated workload;
-3. Only keep issues with score ≥60, sort by score descending, max Top3;
-4. Output strictly in Markdown format, no extra explanations or pleasantries.
+1. Score 0-100 ONLY (100 = perfect match, 0 = no match)
+2. Tech stack match is MOST important (50% weight)
+3. Focus area match is second (30% weight)
+4. Difficulty match is third (20% weight)
+5. Only include issues with score >= 60
+6. ALWAYS output AT LEAST 5 issues (fill to 5 if needed)
+7. Output in EXACT format above, no markdown, no headers, no extra text
 
 Issues to analyze: {{issueList}}`;
 

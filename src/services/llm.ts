@@ -90,7 +90,6 @@ Repo Stars: ${i.repoStars}`
       });
 
       const content = response.choices[0]?.message?.content || '';
-      logger.debug('LLM response:', content);
       return content;
     } catch (error) {
       logger.error('LLM chat failed:', error);
@@ -100,29 +99,38 @@ Repo Stars: ${i.repoStars}`
 
   private parseLLMResponse(content: string, originalIssues: GitHubIssue[]): MatchedIssue[] {
     const matchedIssues: MatchedIssue[] = [];
+    const lines = content.split('\n');
 
     for (const issue of originalIssues) {
-      const scoreMatch = content.match(new RegExp(`#${issue.number}[^\\d]*(\\d+)`, 'i'));
-      const score = scoreMatch && scoreMatch[1] ? parseInt(scoreMatch[1], 10) : 0;
+      // Find the line for this issue - look for "#issue_number" pattern
+      const issueLineIndex = lines.findIndex(line => line.includes(`#${issue.number}`));
+      if (issueLineIndex === -1) continue;
+
+      // Extract score from format like "#123 [SCORE: 85]" or "#123 Score: 85"
+      const issueLine = lines[issueLineIndex];
+      const scoreMatch = issueLine.match(/SCORE:\s*(\d+)|Score:\s*(\d+)|#\d+\s*(\d+)/i);
+      let score = 0;
+      if (scoreMatch) {
+        score = parseInt(scoreMatch[1] || scoreMatch[2] || scoreMatch[3], 10) || 0;
+      }
+      // Clamp score to 0-100 range
+      score = Math.min(100, Math.max(0, score));
 
       if (score >= 60) {
-        const sectionMatch = content.match(
-          new RegExp(`#${issue.number}[\\s\\S]*?(?=#\\d|$$)`, 'i')
-        );
-        const section = sectionMatch ? sectionMatch[0] : '';
+        // Get context lines around the issue line for analysis
+        const context = lines.slice(issueLineIndex, issueLineIndex + 5).join('\n');
 
-        const demandMatch = section.match(/core demand:[:\s]*([\\s\\S]*?)(?=tech requirements|$)/i);
-        const techMatch = section.match(/tech requirements:[:\s]*([\\s\\S]*?)(?=solution hints|estimated workload|$)/i);
-        const solutionMatch = section.match(/solution hints?:[:\s]*([\\s\\S]*?)(?=estimated workload|$)/i);
-        const workloadMatch = section.match(/estimated workload:[:\s]*([\\s\\S]*?)(?=##|$)/i);
+        const demandMatch = context.match(/Core Demand:\s*([^\n]+)/i);
+        const techMatch = context.match(/Tech(?:nology)? Requirements?:\s*([^\n]+)/i);
+        const workloadMatch = context.match(/Estimated Workload:\s*([^\n]+)/i);
 
         matchedIssues.push({
           ...issue,
           matchScore: score,
           analysis: {
             coreDemand: demandMatch && demandMatch[1] ? demandMatch[1].trim() : '',
-            techRequirements: techMatch && techMatch[1] ? techMatch[1].split(/[,\n]/).map(s => s.trim()).filter(Boolean) : [],
-            solutionSuggestion: solutionMatch && solutionMatch[1] ? solutionMatch[1].trim() : '',
+            techRequirements: techMatch && techMatch[1] ? techMatch[1].split(/[,;]/).map(s => s.trim()).filter(Boolean) : [],
+            solutionSuggestion: '',
             estimatedWorkload: workloadMatch && workloadMatch[1] ? workloadMatch[1].trim() : '',
           },
         });
