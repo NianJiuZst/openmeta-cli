@@ -1,58 +1,33 @@
 import OpenAI from 'openai';
-import type { GitHubIssue, MatchedIssue, UserProfile, LLMProvider } from '../types/index.js';
+import type { GitHubIssue, MatchedIssue, UserProfile } from '../types/index.js';
 import { logger } from '../infra/logger.js';
 import { fillPrompt, ISSUE_MATCH_PROMPT, DAILY_REPORT_GENERATE_PROMPT, DAILY_DIARY_GENERATE_PROMPT } from '../infra/prompt-templates.js';
 
 export class LLMService {
   private client: OpenAI | null = null;
-  private provider: LLMProvider = 'openai';
-  private apiKey: string = '';
-  private apiBaseUrl: string = '';
+  private modelName: string = 'gpt-4o-mini';
 
-  initialize(apiKey: string, baseUrl: string, provider: LLMProvider = 'openai', _modelName?: string): void {
-    this.apiKey = apiKey;
-    this.apiBaseUrl = baseUrl;
-    this.provider = provider;
-
-    if (provider === 'openai') {
-      this.client = new OpenAI({
-        apiKey,
-        baseURL: baseUrl,
-      });
+  initialize(apiKey: string, baseUrl: string, _provider?: string, modelName?: string): void {
+    this.client = new OpenAI({
+      apiKey,
+      baseURL: baseUrl,
+    });
+    if (modelName) {
+      this.modelName = modelName;
     }
   }
 
   async validateConnection(): Promise<boolean> {
+    if (!this.client) {
+      throw new Error('LLM client not initialized');
+    }
+
     try {
-      if (this.provider === 'minimax') {
-        return await this.validateMiniMax();
-      } else {
-        if (!this.client) {
-          throw new Error('OpenAI client not initialized');
-        }
-        await this.client.models.list();
-        logger.success('LLM API connection validated');
-        return true;
-      }
+      await this.client.models.list();
+      logger.success('LLM API connection validated');
+      return true;
     } catch (error) {
       logger.error('LLM API connection failed:', error);
-      return false;
-    }
-  }
-
-  private async validateMiniMax(): Promise<boolean> {
-    try {
-      const response = await fetch(`${this.apiBaseUrl}/v1/models`, {
-        headers: {
-          'Authorization': `Bearer ${this.apiKey}`,
-        },
-      });
-      if (response.ok) {
-        logger.success('LLM API connection validated');
-        return true;
-      }
-      return false;
-    } catch {
       return false;
     }
   }
@@ -95,22 +70,14 @@ Repo Stars: ${i.repoStars}`
     return await this.chat(prompt);
   }
 
-  private async chat(prompt: string, model?: string): Promise<string> {
-    if (this.provider === 'minimax') {
-      return await this.chatMiniMax(prompt, model);
-    } else {
-      return await this.chatOpenAI(prompt, model);
-    }
-  }
-
-  private async chatOpenAI(prompt: string, model?: string): Promise<string> {
+  private async chat(prompt: string): Promise<string> {
     if (!this.client) {
-      throw new Error('OpenAI client not initialized');
+      throw new Error('LLM client not initialized');
     }
 
     try {
       const response = await this.client.chat.completions.create({
-        model: model || 'gpt-4o-mini',
+        model: this.modelName,
         messages: [
           { role: 'system', content: 'You are a helpful assistant.' },
           { role: 'user', content: prompt },
@@ -122,47 +89,7 @@ Repo Stars: ${i.repoStars}`
       logger.debug('LLM response:', content);
       return content;
     } catch (error) {
-      logger.error('OpenAI chat failed:', error);
-      throw error;
-    }
-  }
-
-  private async chatMiniMax(prompt: string, model?: string): Promise<string> {
-    const modelName = model || 'MiniMax-Text-01';
-
-    try {
-      const response = await fetch(`${this.apiBaseUrl}/v1/text/chatcompletion_v2`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.apiKey}`,
-        },
-        body: JSON.stringify({
-          model: modelName,
-          messages: [
-            { role: 'system', content: 'You are a helpful assistant.' },
-            { role: 'user', content: prompt },
-          ],
-          temperature: 0.7,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`MiniMax API error: ${response.status} - ${errorText}`);
-      }
-
-      const data = await response.json() as {
-        choices?: Array<{ messages?: Array<{ content?: string }> }>;
-        text?: string;
-      };
-
-      // MiniMax response format varies, try different paths
-      const content = data.choices?.[0]?.messages?.[0]?.content || data.text || '';
-      logger.debug('MiniMax response:', content);
-      return content;
-    } catch (error) {
-      logger.error('MiniMax chat failed:', error);
+      logger.error('LLM chat failed:', error);
       throw error;
     }
   }

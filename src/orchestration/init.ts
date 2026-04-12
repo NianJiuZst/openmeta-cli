@@ -3,6 +3,21 @@ import type { AppConfig, ProficiencyLevel, LLMProvider } from '../types/index.js
 import { githubService, llmService } from '../services/index.js';
 import { configService, logger } from '../infra/index.js';
 
+const MINIMAX_OPENAI_BASE_URL = 'https://api.minimaxi.com/v1';
+const MINIMAX_MODELS = [
+  { name: 'MiniMax-M2.7 (Latest, Fast)', value: 'MiniMax-M2.7' },
+  { name: 'MiniMax-M2.5', value: 'MiniMax-M2.5' },
+  { name: 'MiniMax-M2.1', value: 'MiniMax-M2.1' },
+  { name: 'MiniMax-M2', value: 'MiniMax-M2' },
+];
+
+const OPENAI_MODELS = [
+  { name: 'GPT-4o-mini (Recommended)', value: 'gpt-4o-mini' },
+  { name: 'GPT-4o', value: 'gpt-4o' },
+  { name: 'GPT-4-turbo', value: 'gpt-4-turbo' },
+  { name: 'Custom model name...', value: '__custom__' },
+];
+
 export class InitOrchestrator {
   async execute(): Promise<void> {
     logger.info('Starting OpenMeta CLI initialization...');
@@ -12,7 +27,7 @@ export class InitOrchestrator {
     console.log('\n=== Step 1: GitHub Configuration ===\n');
 
     const pat = await this.promptGitHubPAT();
-    const username = await this.promptUsername(pat);
+    const username = await this.promptUsername();
 
     githubService.initialize(pat, username);
     const ghValid = await githubService.validateCredentials();
@@ -47,42 +62,61 @@ export class InitOrchestrator {
         message: 'Select LLM provider:',
         choices: [
           { name: 'OpenAI (or OpenAI-compatible API)', value: 'openai' },
-          { name: 'MiniMax', value: 'minimax' },
+          { name: 'MiniMax (OpenAI-compatible)', value: 'minimax' },
         ],
       },
     ]);
 
-    let defaultApiBaseUrl: string;
-    let defaultModel: string;
+    let apiBaseUrl: string;
+    let modelName: string;
 
     if (provider === 'minimax') {
-      defaultApiBaseUrl = 'https://api.minimax.chat';
-      defaultModel = 'MiniMax-Text-01';
+      apiBaseUrl = MINIMAX_OPENAI_BASE_URL;
+      const { selectedModel } = await inquirer.prompt<{ selectedModel: string }>([
+        {
+          type: 'list',
+          name: 'selectedModel',
+          message: 'Select MiniMax model:',
+          choices: MINIMAX_MODELS,
+        },
+      ]);
+      modelName = selectedModel;
     } else {
-      defaultApiBaseUrl = 'https://api.openai.com/v1';
-      defaultModel = 'gpt-4o-mini';
+      const { selectedModel } = await inquirer.prompt<{ selectedModel: string }>([
+        {
+          type: 'list',
+          name: 'selectedModel',
+          message: 'Select OpenAI model:',
+          choices: OPENAI_MODELS,
+        },
+      ]);
+
+      if (selectedModel === '__custom__') {
+        const { customModel } = await inquirer.prompt<{ customModel: string }>([
+          {
+            type: 'input',
+            name: 'customModel',
+            message: 'Enter custom model name:',
+            validate: (input) => input.length > 0 || 'Model name is required',
+          },
+        ]);
+        modelName = customModel;
+      } else {
+        modelName = selectedModel;
+      }
+
+      const { baseUrlInput } = await inquirer.prompt<{ baseUrlInput: string }>([
+        {
+          type: 'input',
+          name: 'baseUrlInput',
+          message: 'Enter API Base URL (press Enter for default):',
+          default: 'https://api.openai.com/v1',
+        },
+      ]);
+      apiBaseUrl = baseUrlInput || 'https://api.openai.com/v1';
     }
 
-    const { apiBaseUrl } = await inquirer.prompt<{ apiBaseUrl: string }>([
-      {
-        type: 'input',
-        name: 'apiBaseUrl',
-        message: 'Enter LLM API Base URL:',
-        default: defaultApiBaseUrl,
-        validate: (input) => input.length > 0 || 'Base URL is required',
-      },
-    ]);
-
     const apiKey = await this.promptAPIKey();
-
-    const { modelName } = await inquirer.prompt<{ modelName: string }>([
-      {
-        type: 'input',
-        name: 'modelName',
-        message: 'Enter model name:',
-        default: defaultModel,
-      },
-    ]);
 
     llmService.initialize(apiKey, apiBaseUrl, provider, modelName);
     const llmValid = await llmService.validateConnection();
@@ -207,8 +241,7 @@ export class InitOrchestrator {
     return apiKey;
   }
 
-  private async promptUsername(pat: string): Promise<string> {
-    // Auto-detect username from PAT if possible, but still let user confirm or change
+  private async promptUsername(): Promise<string> {
     const { username } = await inquirer.prompt<{ username: string }>([
       {
         type: 'input',
