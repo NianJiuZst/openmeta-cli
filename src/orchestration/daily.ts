@@ -1,10 +1,12 @@
 import inquirer from 'inquirer';
-import { existsSync } from 'fs';
+import { existsSync, mkdirSync } from 'fs';
+import { homedir } from 'os';
 import type { AppConfig, MatchedIssue, GeneratedContent } from '../types/index.js';
 import { githubService, llmService, contentService, gitService } from '../services/index.js';
 import { logger, configService } from '../infra/index.js';
 import type { ContentType } from '../types/content.types.js';
 import { Octokit } from '@octokit/rest';
+import { simpleGit } from 'simple-git';
 
 export class DailyOrchestrator {
   private octokit: Octokit | null = null;
@@ -171,15 +173,13 @@ export class DailyOrchestrator {
 
     // Create a new private repo if not configured
     const repoName = 'openmeta-daily';
-    const { mkdirSync, homedir } = await import('fs');
-    const repoPath = `${homedir()}/.openmeta/${repoName}`;
+    const repoPath = `${homedir}/.openmeta/${repoName}`;
 
     if (!existsSync(repoPath)) {
       mkdirSync(repoPath, { recursive: true });
     }
 
     // Initialize git and create remote repo
-    const { simpleGit } = await import('simple-git');
     const git = simpleGit(repoPath);
     await git.init();
 
