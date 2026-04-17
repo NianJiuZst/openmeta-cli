@@ -1,5 +1,6 @@
 import { simpleGit, type SimpleGit } from 'simple-git';
-import { existsSync } from 'fs';
+import { existsSync, writeFileSync } from 'fs';
+import { join } from 'path';
 import { logger } from '../infra/logger.js';
 
 export class GitService {
@@ -35,12 +36,14 @@ export class GitService {
 
     try {
       const fileName = `openmeta-daily-${new Date().toISOString().split('T')[0]}.md`;
-      const { writeFileSync } = await import('fs');
-      writeFileSync(`${this.repoPath}/${fileName}`, content, 'utf-8');
+      const filePath = join(this.repoPath, fileName);
+      writeFileSync(filePath, content, 'utf-8');
 
       logger.info(`File created: ${fileName}`);
 
-      await this.git.add('.');
+      const branch = await this.ensureActiveBranch();
+
+      await this.git.add(fileName);
       logger.debug('Files staged');
 
       await this.git.commit(commitMessage);
@@ -48,7 +51,7 @@ export class GitService {
 
       const remotes = await this.git.getRemotes();
       if (remotes.length > 0) {
-        await this.git.push();
+        await this.git.raw(['push', '--set-upstream', 'origin', branch]);
         logger.success('Changes pushed to remote');
       } else {
         logger.warn('No remote configured, skipping push');
@@ -77,6 +80,32 @@ export class GitService {
 
     const status = await this.git.status();
     return status.files.length > 0;
+  }
+
+  private async ensureActiveBranch(): Promise<string> {
+    if (!this.git) {
+      throw new Error('Git service not initialized');
+    }
+
+    const preferredBranch = 'main';
+    const status = await this.git.status();
+    if (status.current) {
+      return status.current;
+    }
+
+    const branches = await this.git.branchLocal();
+    if (branches.all.includes(preferredBranch)) {
+      await this.git.checkout(preferredBranch);
+      return preferredBranch;
+    }
+
+    try {
+      await this.git.checkoutLocalBranch(preferredBranch);
+    } catch {
+      await this.git.checkout(['-B', preferredBranch]);
+    }
+
+    return preferredBranch;
   }
 }
 

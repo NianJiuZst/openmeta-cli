@@ -2,12 +2,13 @@ import inquirer from 'inquirer';
 import chalk from 'chalk';
 import { existsSync, mkdirSync } from 'fs';
 import { homedir } from 'os';
+import { join } from 'path';
 import type { AppConfig, MatchedIssue, GeneratedContent } from '../types/index.js';
 import { githubService, llmService, contentService, gitService } from '../services/index.js';
 import { logger, configService } from '../infra/index.js';
 import type { ContentType } from '../types/content.types.js';
 import { Octokit } from '@octokit/rest';
-import { simpleGit } from 'simple-git';
+import { simpleGit, type SimpleGit } from 'simple-git';
 
 export class DailyOrchestrator {
   private octokit: Octokit | null = null;
@@ -237,54 +238,142 @@ export class DailyOrchestrator {
   }
 
   private async ensureTargetRepo(config: AppConfig): Promise<string> {
-    if (config.github.targetRepoPath && existsSync(config.github.targetRepoPath)) {
+    if (config.github.targetRepoPath) {
+      if (!existsSync(config.github.targetRepoPath)) {
+        throw new Error(`Configured target repository path does not exist: ${config.github.targetRepoPath}`);
+      }
+
       return config.github.targetRepoPath;
     }
 
+    if (!this.octokit) {
+      throw new Error('GitHub service not initialized');
+    }
+
     const repoName = 'openmeta-daily';
-    const repoPath = `${homedir}/.openmeta/${repoName}`;
+    const repoPath = join(homedir(), '.openmeta', repoName);
 
     if (!existsSync(repoPath)) {
       mkdirSync(repoPath, { recursive: true });
     }
 
     const git = simpleGit(repoPath);
-
-    // Check if already a git repo
     const isRepo = await git.checkIsRepo();
-
     if (!isRepo) {
       await git.init();
     }
 
-    // Check if remote already exists
-    const remotes = await git.getRemotes();
-    let hasOrigin = remotes.some(r => r.name === 'origin');
+    const remoteRepo = await this.ensureManagedRemoteRepo(config.github.username, repoName);
+    await this.ensureOriginRemote(git, remoteRepo.cloneUrl);
+    await this.prepareLocalRepository(git, remoteRepo.defaultBranch, remoteRepo.hasCommits);
 
-    if (!hasOrigin) {
-      // Check if repo exists on GitHub
+    return repoPath;
+  }
+
+  private async ensureManagedRemoteRepo(
+    username: string,
+    repoName: string,
+  ): Promise<{ cloneUrl: string; defaultBranch: string; hasCommits: boolean }> {
+    if (!this.octokit) {
+      throw new Error('GitHub service not initialized');
+    }
+
+    try {
+      const { data } = await this.octokit.rest.repos.get({
+        owner: username,
+        repo: repoName,
+      });
+
+      logger.success(`Connected to existing repository: ${data.html_url}`);
+      return {
+        cloneUrl: data.clone_url,
+        defaultBranch: data.default_branch || 'main',
+        hasCommits: Boolean(data.pushed_at),
+      };
+    } catch (error) {
+      const err = error as { status?: number };
+      if (err.status && err.status !== 404) {
+        throw error;
+      }
+
+      const { data } = await this.octokit.rest.repos.createForAuthenticatedUser({
+        name: repoName,
+        private: true,
+        auto_init: false,
+        description: 'Daily open source contribution tracking',
+      });
+
+      logger.success(`Created repository: ${data.clone_url}`);
+      return {
+        cloneUrl: data.clone_url,
+        defaultBranch: data.default_branch || 'main',
+        hasCommits: false,
+      };
+    }
+  }
+
+  private async ensureOriginRemote(git: SimpleGit, remoteUrl: string): Promise<void> {
+    const remotes = await git.getRemotes(true);
+    const origin = remotes.find(remote => remote.name === 'origin');
+
+    if (!origin) {
+      await git.addRemote('origin', remoteUrl);
+      return;
+    }
+
+    const existingUrl = origin.refs.fetch || origin.refs.push;
+    if (existingUrl && existingUrl !== remoteUrl) {
+      logger.warn(`Origin remote already points to ${existingUrl}. Leaving the existing remote untouched.`);
+    }
+  }
+
+  private async prepareLocalRepository(
+    git: SimpleGit,
+    defaultBranch: string,
+    hasRemoteCommits: boolean,
+  ): Promise<void> {
+    if (hasRemoteCommits) {
       try {
-        await this.octokit!.rest.repos.get({
-          owner: config.github.username,
-          repo: repoName,
-        });
-        // Repo exists, just add remote
-        await git.addRemote('origin', `https://github.com/${config.github.username}/${repoName}.git`);
-        logger.success(`Connected to existing repository: https://github.com/${config.github.username}/${repoName}`);
-      } catch {
-        // Repo doesn't exist, create it
-        const { data } = await this.octokit!.rest.repos.createForAuthenticatedUser({
-          name: repoName,
-          private: true,
-          auto_init: true,
-          description: 'Daily open source contribution tracking',
-        });
-        await git.addRemote('origin', data.clone_url);
-        logger.success(`Created repository: ${data.clone_url}`);
+        await git.fetch('origin', defaultBranch);
+
+        if (!(await this.hasLocalCommits(git))) {
+          await git.checkout(['-B', defaultBranch, `origin/${defaultBranch}`]);
+          return;
+        }
+      } catch (error) {
+        logger.warn(`Unable to sync local repository with origin/${defaultBranch}. Continuing with the local branch.`, error);
       }
     }
 
-    return repoPath;
+    await this.ensureLocalBranch(git, defaultBranch);
+  }
+
+  private async ensureLocalBranch(git: SimpleGit, branchName: string): Promise<void> {
+    const status = await git.status();
+    if (status.current === branchName) {
+      return;
+    }
+
+    const branches = await git.branchLocal();
+    if (branches.all.includes(branchName)) {
+      await git.checkout(branchName);
+      return;
+    }
+
+    try {
+      await git.checkoutLocalBranch(branchName);
+    } catch {
+      await git.checkout(['-B', branchName]);
+    }
+  }
+
+  private async hasLocalCommits(git: SimpleGit): Promise<boolean> {
+    try {
+      await git.raw(['rev-parse', '--verify', 'HEAD']);
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
