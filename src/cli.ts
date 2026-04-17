@@ -1,6 +1,15 @@
 #!/usr/bin/env bun
 import { Command } from 'commander';
-import { registerInitCommand, registerDailyCommand, registerConfigCommand, registerAutomationCommand } from './commands/index.js';
+import {
+  registerAgentCommand,
+  registerAutomationCommand,
+  registerConfigCommand,
+  registerDailyCommand,
+  registerInboxCommand,
+  registerInitCommand,
+  registerPowCommand,
+  registerScoutCommand,
+} from './commands/index.js';
 import { getErrorMessage, ui } from './infra/index.js';
 
 const VERSION = '1.0.0';
@@ -17,7 +26,11 @@ async function main(): Promise<void> {
     .showHelpAfterError();
 
   registerInitCommand(program);
+  registerAgentCommand(program);
   registerDailyCommand(program);
+  registerScoutCommand(program);
+  registerInboxCommand(program);
+  registerPowCommand(program);
   registerConfigCommand(program);
   registerAutomationCommand(program);
 

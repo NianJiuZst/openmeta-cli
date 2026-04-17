@@ -1,4 +1,8 @@
+export { registerAgentCommand } from './agent.js';
 export { registerInitCommand } from './init.js';
 export { registerDailyCommand } from './daily.js';
+export { registerScoutCommand } from './scout.js';
+export { registerInboxCommand } from './inbox.js';
+export { registerPowCommand } from './pow.js';
 export { registerConfigCommand } from './config.js';
 export { registerAutomationCommand } from './automation.js';
