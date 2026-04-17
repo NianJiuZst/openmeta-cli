@@ -36,6 +36,17 @@ export interface RepoFileSnippet {
   content: string;
 }
 
+export interface GeneratedFileChange {
+  path: string;
+  reason: string;
+  content: string;
+}
+
+export interface ImplementationDraft {
+  summary: string;
+  fileChanges: GeneratedFileChange[];
+}
+
 export interface RepoWorkspaceContext {
   workspacePath: string;
   workspaceDirty: boolean;
@@ -94,6 +105,8 @@ export interface ProofOfWorkRecord {
   artifactDir: string;
   generatedAt: string;
   published: boolean;
+  pullRequestUrl?: string;
+  pullRequestNumber?: number;
 }
 
 export interface ContributionArtifacts {
@@ -116,4 +129,6 @@ export interface ContributionAgentResult {
   artifacts: ContributionArtifacts;
   inboxItem: ContributionInboxItem;
   proofRecord: ProofOfWorkRecord;
+  changedFiles?: string[];
+  pullRequestUrl?: string;
 }

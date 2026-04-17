@@ -1,7 +1,16 @@
 import OpenAI from 'openai';
-import type { GitHubIssue, MatchedIssue, RankedIssue, RepoMemory, RepoWorkspaceContext, UserProfile } from '../types/index.js';
+import type {
+  GitHubIssue,
+  ImplementationDraft,
+  MatchedIssue,
+  RankedIssue,
+  RepoMemory,
+  RepoWorkspaceContext,
+  UserProfile,
+} from '../types/index.js';
 import { logger } from '../infra/logger.js';
 import {
+  CODE_CHANGE_PROMPT,
   fillPrompt,
   ISSUE_MATCH_PROMPT,
   DAILY_REPORT_GENERATE_PROMPT,
@@ -112,6 +121,25 @@ Repo Stars: ${i.repoStars}`
     return await this.chat(prompt);
   }
 
+  async generateImplementationDraft(
+    issue: RankedIssue,
+    workspace: RepoWorkspaceContext,
+    patchDraft: string,
+  ): Promise<ImplementationDraft> {
+    const editableFiles = workspace.snippets.length > 0
+      ? workspace.snippets.map((snippet) => `FILE: ${snippet.path}\n${snippet.content}`).join('\n\n')
+      : 'No editable files were detected.';
+
+    const prompt = fillPrompt(CODE_CHANGE_PROMPT, {
+      issueContext: this.formatRankedIssue(issue),
+      patchDraft,
+      editableFiles,
+    });
+
+    const content = await this.chat(prompt, { temperature: 0.2 });
+    return this.parseImplementationDraft(content);
+  }
+
   async generatePrDraft(
     issue: RankedIssue,
     patchDraft: string,
@@ -131,7 +159,7 @@ Repo Stars: ${i.repoStars}`
     return await this.chat(prompt);
   }
 
-  private async chat(prompt: string): Promise<string> {
+  private async chat(prompt: string, options: { temperature?: number } = {}): Promise<string> {
     if (!this.client) {
       throw new Error('LLM client not initialized');
     }
@@ -143,7 +171,7 @@ Repo Stars: ${i.repoStars}`
           { role: 'system', content: 'You are a helpful assistant.' },
           { role: 'user', content: prompt },
         ],
-        temperature: 0.7,
+        temperature: options.temperature ?? 0.7,
       });
 
       const content = response.choices[0]?.message?.content || '';
@@ -199,6 +227,39 @@ Repo Stars: ${i.repoStars}`
     }
 
     return matchedIssues.sort((a, b) => b.matchScore - a.matchScore);
+  }
+
+  private parseImplementationDraft(content: string): ImplementationDraft {
+    const payload = this.extractJsonObject(content);
+    const parsed = JSON.parse(payload) as Partial<ImplementationDraft>;
+
+    return {
+      summary: typeof parsed.summary === 'string' ? parsed.summary.trim() : '',
+      fileChanges: Array.isArray(parsed.fileChanges)
+        ? parsed.fileChanges
+          .map((item) => ({
+            path: typeof item?.path === 'string' ? item.path.trim() : '',
+            reason: typeof item?.reason === 'string' ? item.reason.trim() : '',
+            content: typeof item?.content === 'string' ? item.content : '',
+          }))
+          .filter((item) => item.path.length > 0 && item.content.length > 0)
+        : [],
+    };
+  }
+
+  private extractJsonObject(content: string): string {
+    const fencedMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fencedMatch?.[1]) {
+      return fencedMatch[1].trim();
+    }
+
+    const firstBrace = content.indexOf('{');
+    const lastBrace = content.lastIndexOf('}');
+    if (firstBrace >= 0 && lastBrace > firstBrace) {
+      return content.slice(firstBrace, lastBrace + 1).trim();
+    }
+
+    throw new Error('LLM did not return a valid JSON object for the implementation draft.');
   }
 
   private getIssueReference(issue: GitHubIssue): string {

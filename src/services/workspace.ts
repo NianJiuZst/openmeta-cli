@@ -1,9 +1,16 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync } from 'fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
 import { spawnSync } from 'child_process';
-import { basename, dirname, join, relative } from 'path';
+import { basename, dirname, join, relative, resolve, sep } from 'path';
 import { simpleGit, type SimpleGit } from 'simple-git';
 import { ensureDirectory, getOpenMetaWorkspaceRoot, logger } from '../infra/index.js';
-import type { RankedIssue, RepoMemory, RepoWorkspaceContext, TestCommand, TestResult } from '../types/index.js';
+import type {
+  GeneratedFileChange,
+  RankedIssue,
+  RepoMemory,
+  RepoWorkspaceContext,
+  TestCommand,
+  TestResult,
+} from '../types/index.js';
 
 const EXCLUDED_DIRS = new Set([
   '.git',
@@ -92,6 +99,39 @@ export class WorkspaceService {
       testCommands,
       testResults,
     };
+  }
+
+  applyGeneratedChanges(workspacePath: string, fileChanges: GeneratedFileChange[]): string[] {
+    const rootPath = resolve(workspacePath);
+    const appliedFiles: string[] = [];
+
+    for (const change of fileChanges) {
+      const relativePath = change.path.replace(/^\/+/, '').trim();
+      if (!relativePath) {
+        continue;
+      }
+
+      const targetPath = resolve(rootPath, relativePath);
+      if (targetPath !== rootPath && !targetPath.startsWith(`${rootPath}${sep}`)) {
+        logger.warn(`Skipping unsafe generated path outside the workspace: ${change.path}`);
+        continue;
+      }
+
+      const existingContent = existsSync(targetPath) ? readFileSync(targetPath, 'utf-8') : null;
+      if (existingContent === change.content) {
+        continue;
+      }
+
+      mkdirSync(dirname(targetPath), { recursive: true });
+      writeFileSync(targetPath, change.content, 'utf-8');
+      appliedFiles.push(relativePath);
+    }
+
+    return appliedFiles;
+  }
+
+  runValidationCommands(workspacePath: string, commands: TestCommand[]): TestResult[] {
+    return this.runTestCommands(workspacePath, commands);
   }
 
   private async detectDefaultBranch(git: SimpleGit): Promise<string> {

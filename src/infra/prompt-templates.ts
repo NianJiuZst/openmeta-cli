@@ -63,6 +63,41 @@ Repo Memory:
 {{repoMemory}}
 `;
 
+export const CODE_CHANGE_PROMPT = `You are OpenMeta, an autonomous open source contribution agent.
+
+Generate a concrete implementation patch as strict JSON.
+
+Output schema:
+{
+  "summary": "short summary",
+  "fileChanges": [
+    {
+      "path": "relative/path/to/file",
+      "reason": "why this file changes",
+      "content": "full updated file content"
+    }
+  ]
+}
+
+Requirements:
+1. Return valid JSON only. No markdown fences. No commentary.
+2. Keep the change set minimal and high confidence.
+3. Prefer editing only the provided editable files. Add a new file only when clearly necessary.
+4. Each fileChanges[].content must be the full final file content after the edit.
+5. Do not delete files.
+6. If context is insufficient for a safe implementation, return {"summary":"Insufficient context for a safe code patch.","fileChanges":[]}
+7. Preserve the project's apparent style and formatting.
+
+Issue:
+{{issueContext}}
+
+Patch Draft:
+{{patchDraft}}
+
+Editable Files:
+{{editableFiles}}
+`;
+
 export const PR_DRAFT_PROMPT = `You are OpenMeta, an autonomous open source contribution agent.
 
 Write a pull request draft in Markdown for the selected issue.

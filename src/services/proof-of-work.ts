@@ -59,7 +59,7 @@ export class ProofOfWorkService {
       '## Recent Activity',
       '',
       ...(records.slice(0, 10).length > 0
-        ? records.slice(0, 10).map((record) => `- ${record.repoFullName}#${record.issueNumber} | overall ${record.overallScore} | published=${record.published}`)
+        ? records.slice(0, 10).map((record) => `- ${record.repoFullName}#${record.issueNumber} | overall ${record.overallScore} | published=${record.published}${record.pullRequestUrl ? ` | pr=${record.pullRequestUrl}` : ''}`)
         : ['- No activity recorded']),
       '',
       `_Snapshot Date: ${getLocalDateStamp()}_`,

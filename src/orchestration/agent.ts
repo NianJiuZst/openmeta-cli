@@ -1,10 +1,16 @@
 import chalk from 'chalk';
-import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { dirname, join } from 'path';
 import { Octokit } from '@octokit/rest';
 import { simpleGit, type SimpleGit } from 'simple-git';
-import type { AppConfig, ContributionAgentResult, RankedIssue } from '../types/index.js';
+import type {
+  AppConfig,
+  ContributionAgentResult,
+  RankedIssue,
+  RepoWorkspaceContext,
+  TestResult,
+} from '../types/index.js';
 import {
   configService,
   ensureDirectory,
@@ -33,6 +39,26 @@ export interface AgentRunOptions {
   force?: boolean;
   schedulerRun?: boolean;
   runChecks?: boolean;
+}
+
+interface TargetRepoContext {
+  path: string;
+  owner: string;
+  repo: string;
+  defaultBranch: string;
+}
+
+interface DraftPullRequest {
+  title: string;
+  body: string;
+}
+
+interface ContributionPullRequestResult {
+  branchName?: string;
+  url?: string;
+  number?: number;
+  changedFiles: string[];
+  validationResults: TestResult[];
 }
 
 export class AgentOrchestrator {
@@ -92,9 +118,25 @@ export class AgentOrchestrator {
     const workspace = await workspaceService.prepareWorkspace(selectedIssue, memoryBeforeRun, runChecks);
     const memory = memoryService.update(selectedIssue, workspace);
 
-    ui.section('Generate artifacts', 'Drafting patch strategy, PR draft, inbox entry, and proof-of-work.');
+    ui.section('Generate artifacts', 'Drafting patch strategy, applying a concrete patch, and preparing PR materials.');
     const patchDraft = await llmService.generatePatchDraft(selectedIssue, workspace, memory);
-    const prDraft = await llmService.generatePrDraft(selectedIssue, patchDraft, workspace);
+    const implementation = await this.generateConcretePatch(selectedIssue, workspace, patchDraft, runChecks);
+    const workspaceForArtifacts: RepoWorkspaceContext = {
+      ...workspace,
+      testResults: implementation.validationResults,
+    };
+    const prDraft = await llmService.generatePrDraft(selectedIssue, patchDraft, workspaceForArtifacts);
+
+    const contributionPullRequest = await this.submitContributionPullRequestIfPossible({
+      config,
+      headless,
+      issue: selectedIssue,
+      prDraft,
+      workspace: workspaceForArtifacts,
+      changedFiles: implementation.changedFiles,
+      validationResults: implementation.validationResults,
+    });
+
     const artifacts = this.prepareLocalArtifactPaths(selectedIssue);
 
     const inboxItem = {
@@ -122,9 +164,11 @@ export class AgentOrchestrator {
       artifactDir: artifacts.artifactDir,
       generatedAt: new Date().toISOString(),
       published: false,
+      pullRequestUrl: contributionPullRequest.url,
+      pullRequestNumber: contributionPullRequest.number,
     };
 
-    const dossier = contentService.formatContributionDossier(selectedIssue, workspace, memory, patchDraft, prDraft);
+    const dossier = contentService.formatContributionDossier(selectedIssue, workspaceForArtifacts, memory, patchDraft, prDraft);
     const proofMarkdown = proofOfWorkService.renderMarkdown([
       proofRecord,
       ...proofOfWorkService.load().records,
@@ -140,7 +184,7 @@ export class AgentOrchestrator {
       proofMarkdown,
     });
 
-    const published = await this.publishArtifactsIfNeeded({
+    const publishResult = await this.publishArtifactsIfNeeded({
       config,
       headless,
       issue: selectedIssue,
@@ -150,17 +194,20 @@ export class AgentOrchestrator {
       memoryMarkdown: memoryService.renderMarkdown(memory),
       inboxMarkdown: inboxService.renderMarkdown(inboxItems),
       proofMarkdown,
+      changedFiles: implementation.changedFiles,
+      validationResults: implementation.validationResults,
+      pullRequestUrl: contributionPullRequest.url,
     });
 
     const finalProofRecord = {
       ...proofRecord,
-      published,
+      published: publishResult.published,
     };
     proofOfWorkService.record(finalProofRecord);
 
     this.showResult({
       issue: selectedIssue,
-      workspace,
+      workspace: workspaceForArtifacts,
       memory,
       patchDraft,
       prDraft,
@@ -168,6 +215,8 @@ export class AgentOrchestrator {
       artifacts,
       inboxItem,
       proofRecord: finalProofRecord,
+      changedFiles: implementation.changedFiles,
+      pullRequestUrl: contributionPullRequest.url,
     });
   }
 
@@ -387,6 +436,51 @@ export class AgentOrchestrator {
     writeFileSync(input.artifacts.proofOfWorkPath, input.proofMarkdown, 'utf-8');
   }
 
+  private async generateConcretePatch(
+    issue: RankedIssue,
+    workspace: RepoWorkspaceContext,
+    patchDraft: string,
+    runChecks: boolean,
+  ): Promise<{ changedFiles: string[]; validationResults: TestResult[] }> {
+    try {
+      const implementation = await llmService.generateImplementationDraft(issue, workspace, patchDraft);
+      if (implementation.fileChanges.length === 0) {
+        logger.warn('OpenMeta could not produce a safe concrete patch from the available repo context. Continuing with draft artifacts only.');
+        return {
+          changedFiles: [],
+          validationResults: workspace.testResults,
+        };
+      }
+
+      ui.section('Apply patch', `Applying ${implementation.fileChanges.length} generated file edits inside the workspace.`);
+      const changedFiles = workspaceService.applyGeneratedChanges(workspace.workspacePath, implementation.fileChanges);
+      if (changedFiles.length === 0) {
+        logger.warn('The generated patch did not change any files in the workspace. Continuing with draft artifacts only.');
+        return {
+          changedFiles: [],
+          validationResults: workspace.testResults,
+        };
+      }
+
+      logger.success(`Applied ${changedFiles.length} workspace file updates`);
+
+      const validationResults = runChecks && workspace.testCommands.length > 0
+        ? workspaceService.runValidationCommands(workspace.workspacePath, workspace.testCommands.slice(0, 3))
+        : workspace.testResults;
+
+      return {
+        changedFiles,
+        validationResults,
+      };
+    } catch (error) {
+      logger.warn('OpenMeta could not generate or apply a safe concrete patch. Continuing with research artifacts only.', error);
+      return {
+        changedFiles: [],
+        validationResults: workspace.testResults,
+      };
+    }
+  }
+
   private async publishArtifactsIfNeeded(input: {
     config: AppConfig;
     headless: boolean;
@@ -397,31 +491,38 @@ export class AgentOrchestrator {
     memoryMarkdown: string;
     inboxMarkdown: string;
     proofMarkdown: string;
-  }): Promise<boolean> {
+    changedFiles: string[];
+    validationResults: TestResult[];
+    pullRequestUrl?: string;
+  }): Promise<{ published: boolean }> {
     const artifactRelativeDir = join('contributions', getLocalDateStamp(), `${input.issue.repoFullName.replace(/\//g, '__')}__${input.issue.number}`);
+    const draftPullRequest = this.parseDraftPullRequest(input.prDraft, input.issue);
 
     if (!input.headless) {
       ui.section('Artifact preview', 'OpenMeta generated a dossier, patch draft, PR draft, inbox update, and proof-of-work update.');
       console.log(`\n  ${chalk.gray('Target directory:')} ${artifactRelativeDir}`);
       console.log(`  ${chalk.gray('Overall score:')} ${input.issue.opportunity.overallScore}`);
-      console.log(`  ${chalk.gray('PR draft title line:')} ${this.extractTitleLine(input.prDraft)}`);
+      console.log(`  ${chalk.gray('PR draft title line:')} ${draftPullRequest.title}`);
+      console.log(`  ${chalk.gray('Changed files:')} ${input.changedFiles.length > 0 ? input.changedFiles.join(', ') : 'none'}`);
+      console.log(`  ${chalk.gray('Validation:')} ${this.formatValidationSummary(input.validationResults)}`);
+      console.log(`  ${chalk.gray('Contribution PR:')} ${input.pullRequestUrl || 'not created'}`);
     }
 
     const shouldCommit = input.headless ? true : await this.promptForCommitConfirmation();
     if (!shouldCommit) {
-      return false;
+      return { published: false };
     }
 
-    const targetRepoPath = await this.ensureTargetRepo(input.config);
-    const gitInitialized = await gitService.initialize(targetRepoPath);
+    const targetRepo = await this.ensureTargetRepo(input.config);
+    const gitInitialized = await gitService.initialize(targetRepo.path);
     if (!gitInitialized) {
-      throw new Error(`Failed to initialize the target repository at ${targetRepoPath}.`);
+      throw new Error(`Failed to initialize the target repository at ${targetRepo.path}.`);
     }
 
     const commitMessage = `feat(agent): draft contribution for ${input.issue.repoFullName}#${input.issue.number}`;
     const finalConfirm = input.headless ? true : await this.promptForFinalCommitConfirmation(commitMessage);
     if (!finalConfirm) {
-      return false;
+      return { published: false };
     }
 
     const publishResult = await gitService.writeAndPublish([
@@ -439,24 +540,122 @@ export class AgentOrchestrator {
 
     ui.banner({
       label: 'OpenMeta Agent',
-      title: 'Contribution artifacts published',
-      subtitle: 'The agent dossier, patch draft, PR draft, inbox, and proof-of-work have been committed.',
+      title: input.pullRequestUrl ? 'Contribution artifacts published and PR linked' : 'Contribution artifacts published',
+      subtitle: input.pullRequestUrl
+        ? 'The agent dossier, patch draft, PR draft, inbox, and proof-of-work have been committed, and the real draft PR link is recorded.'
+        : 'The agent dossier, patch draft, PR draft, inbox, and proof-of-work have been committed.',
       lines: [
         `Issue: ${input.issue.repoFullName}#${input.issue.number}`,
         `Branch: ${publishResult.branch}`,
         `Files: ${publishResult.fileNames.join(', ')}`,
+        ...(input.pullRequestUrl ? [`Pull Request: ${input.pullRequestUrl}`] : []),
       ],
       tone: 'success',
     });
 
-    return true;
+    return { published: true };
+  }
+
+  private async submitContributionPullRequestIfPossible(input: {
+    config: AppConfig;
+    headless: boolean;
+    issue: RankedIssue;
+    prDraft: string;
+    workspace: RepoWorkspaceContext;
+    changedFiles: string[];
+    validationResults: TestResult[];
+  }): Promise<ContributionPullRequestResult> {
+    if (input.changedFiles.length === 0) {
+      return {
+        changedFiles: [],
+        validationResults: input.validationResults,
+      };
+    }
+
+    const hasValidationFailures = input.validationResults.some((result) => !result.passed);
+    if (input.headless && hasValidationFailures) {
+      logger.warn('Skipping real draft PR creation because validation failed in headless mode.');
+      return {
+        changedFiles: input.changedFiles,
+        validationResults: input.validationResults,
+      };
+    }
+
+    if (!input.headless) {
+      ui.section('Contribution PR', 'OpenMeta can push the generated patch to your fork and open a real draft PR against the upstream repository.');
+      console.log(`\n  ${chalk.gray('Changed files:')} ${input.changedFiles.join(', ')}`);
+      console.log(`  ${chalk.gray('Validation:')} ${this.formatValidationSummary(input.validationResults)}`);
+
+      const shouldCreatePr = await this.promptForContributionPrConfirmation(input.issue);
+      if (!shouldCreatePr) {
+        return {
+          changedFiles: input.changedFiles,
+          validationResults: input.validationResults,
+        };
+      }
+
+      if (hasValidationFailures) {
+        const continueWithFailures = await this.promptForFailedValidationConfirmation();
+        if (!continueWithFailures) {
+          return {
+            changedFiles: input.changedFiles,
+            validationResults: input.validationResults,
+          };
+        }
+      }
+    }
+
+    try {
+      const upstreamRepo = await this.getUpstreamRepositoryContext(input.issue);
+      const forkRepo = await this.ensureForkRepository(upstreamRepo);
+      const branchName = this.buildPublishBranchName(input.issue);
+      const draftPullRequest = this.parseDraftPullRequest(input.prDraft, input.issue);
+      const commitMessage = this.buildContributionCommitMessage(input.issue);
+
+      await this.createCommitOnFork({
+        forkRepo,
+        branchName,
+        workspacePath: input.workspace.workspacePath,
+        changedFiles: input.changedFiles,
+        commitMessage,
+      });
+
+      const contributionPullRequest = await this.createContributionPullRequest(upstreamRepo, forkRepo.owner, branchName, draftPullRequest);
+
+      ui.banner({
+        label: 'OpenMeta Agent',
+        title: 'Draft PR created',
+        subtitle: 'The generated patch has been pushed to your fork and opened as a real draft PR against the upstream repository.',
+        lines: [
+          `Repository: ${input.issue.repoFullName}`,
+          `Branch: ${branchName}`,
+          `Changed Files: ${input.changedFiles.join(', ')}`,
+          `Pull Request: ${contributionPullRequest.url}`,
+        ],
+        tone: 'success',
+      });
+
+      return {
+        branchName,
+        url: contributionPullRequest.url,
+        number: contributionPullRequest.number,
+        changedFiles: input.changedFiles,
+        validationResults: input.validationResults,
+      };
+    } catch (error) {
+      logger.warn('Real PR submission failed. Keeping the generated patch in the local workspace and continuing with artifact publication.', error);
+      return {
+        changedFiles: input.changedFiles,
+        validationResults: input.validationResults,
+      };
+    }
   }
 
   private async confirmManualHeadlessRun(config: AppConfig): Promise<void> {
     ui.banner({
       label: 'OpenMeta Agent',
       title: 'Headless agent mode runs without prompts',
-      subtitle: 'This mode scouts, drafts patch and PR artifacts, updates inbox and proof-of-work, and can commit to your target repository without interactive review.',
+      subtitle: 'This mode scouts, drafts patch and PR artifacts, can open a real upstream draft PR, updates inbox and proof-of-work, and can commit to your target repository without interactive review.',
       lines: [
         `Automation enabled: ${config.automation.enabled ? 'yes' : 'no'}`,
         `Scheduled time: ${config.automation.scheduleTime} (${config.automation.timezone})`,
@@ -469,7 +668,7 @@ export class AgentOrchestrator {
       {
         type: 'confirm',
         name: 'acknowledgeRisk',
-        message: 'Do you understand that headless agent mode can publish generated artifacts without another review step?',
+        message: 'Do you understand that headless agent mode can publish generated artifacts and may open a real draft PR without another review step?',
         default: false,
       },
     ]);
@@ -518,6 +717,40 @@ export class AgentOrchestrator {
     return finalConfirm;
   }
 
+  private async promptForContributionPrConfirmation(issue: RankedIssue): Promise<boolean> {
+    const { confirmPr } = await prompt<{ confirmPr: boolean }>([
+      {
+        type: 'confirm',
+        name: 'confirmPr',
+        message: `Create a real draft PR against ${issue.repoFullName}?`,
+        default: true,
+      },
+    ]);
+
+    return confirmPr;
+  }
+
+  private async promptForFailedValidationConfirmation(): Promise<boolean> {
+    const { continueWithFailures } = await prompt<{ continueWithFailures: boolean }>([
+      {
+        type: 'confirm',
+        name: 'continueWithFailures',
+        message: 'Some validation commands failed. Continue and open a draft PR anyway?',
+        default: false,
+      },
+    ]);
+
+    return continueWithFailures;
+  }
+
+  private formatValidationSummary(results: TestResult[]): string {
+    if (results.length === 0) {
+      return 'not executed';
+    }
+
+    return results.map((result) => `${result.command}=${result.passed ? 'passed' : `failed (${result.exitCode ?? 'n/a'})`}`).join('; ');
+  }
+
   private extractTitleLine(prDraft: string): string {
     const line = prDraft.split('\n').find((candidate) => candidate.trim().startsWith('Title'));
     return line ? line.replace(/^Title:\s*/i, '').trim() : 'n/a';
@@ -532,20 +765,32 @@ export class AgentOrchestrator {
         `Issue: ${result.issue.repoFullName}#${result.issue.number}`,
         `Overall Score: ${result.issue.opportunity.overallScore}`,
         `Workspace: ${result.workspace.workspacePath}`,
+        `Changed Files: ${result.changedFiles && result.changedFiles.length > 0 ? result.changedFiles.join(', ') : 'none'}`,
         `Artifacts: ${result.artifacts.artifactDir}`,
         `Published: ${result.proofRecord.published}`,
+        ...(result.pullRequestUrl ? [`Pull Request: ${result.pullRequestUrl}`] : []),
       ],
       tone: 'success',
     });
   }
 
-  private async ensureTargetRepo(config: AppConfig): Promise<string> {
+  private async ensureTargetRepo(config: AppConfig): Promise<TargetRepoContext> {
     if (config.github.targetRepoPath) {
       if (!existsSync(config.github.targetRepoPath)) {
         throw new Error(`Configured target repository path does not exist: ${config.github.targetRepoPath}`);
       }
 
-      return config.github.targetRepoPath;
+      const git = simpleGit(config.github.targetRepoPath);
+      const remoteUrl = await this.getOriginRemoteUrl(git);
+      const parsedRepo = this.parseGitHubRepository(remoteUrl);
+      const repoInfo = await this.getGitHubRepositoryInfo(parsedRepo.owner, parsedRepo.repo);
+
+      return {
+        path: config.github.targetRepoPath,
+        owner: parsedRepo.owner,
+        repo: parsedRepo.repo,
+        defaultBranch: repoInfo.default_branch || 'main',
+      };
     }
 
     if (!this.octokit) {
@@ -569,7 +814,12 @@ export class AgentOrchestrator {
     await this.ensureOriginRemote(git, remoteRepo.cloneUrl);
     await this.prepareLocalRepository(git, remoteRepo.defaultBranch, remoteRepo.hasCommits);
 
-    return repoPath;
+    return {
+      path: repoPath,
+      owner: config.github.username,
+      repo: repoName,
+      defaultBranch: remoteRepo.defaultBranch,
+    };
   }
 
   private async ensureManagedRemoteRepo(
@@ -627,6 +877,286 @@ export class AgentOrchestrator {
     if (existingUrl && existingUrl !== remoteUrl) {
       logger.warn(`Origin remote already points to ${existingUrl}. Leaving the existing remote untouched.`);
     }
+  }
+
+  private async getOriginRemoteUrl(git: SimpleGit): Promise<string> {
+    const remotes = await git.getRemotes(true);
+    const origin = remotes.find((remote) => remote.name === 'origin');
+    const remoteUrl = origin?.refs.push || origin?.refs.fetch;
+
+    if (!remoteUrl) {
+      throw new Error('Target repository does not have an origin remote configured.');
+    }
+
+    return remoteUrl;
+  }
+
+  private parseGitHubRepository(remoteUrl: string): { owner: string; repo: string } {
+    const sshMatch = remoteUrl.match(/github\.com[:/](.+?)\/(.+?)(?:\.git)?$/);
+    if (!sshMatch) {
+      throw new Error(`Unable to parse GitHub repository from remote URL: ${remoteUrl}`);
+    }
+
+    return {
+      owner: sshMatch[1],
+      repo: sshMatch[2],
+    };
+  }
+
+  private async getGitHubRepositoryInfo(owner: string, repo: string) {
+    if (!this.octokit) {
+      throw new Error('GitHub service not initialized');
+    }
+
+    const { data } = await this.octokit.rest.repos.get({ owner, repo });
+    return data;
+  }
+
+  private buildPublishBranchName(issue: RankedIssue): string {
+    const slug = issue.title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 32);
+
+    return `openmeta/agent-${issue.number}-${slug || 'issue'}-${Date.now()}`;
+  }
+
+  private parseDraftPullRequest(prDraft: string, issue: RankedIssue): DraftPullRequest {
+    const lines = prDraft.split('\n');
+    const titleLine = lines.find((line) => /^title\s*:/i.test(line.trim()));
+    const headingTitle = lines.find((line) => line.trim().startsWith('#'));
+    const title = titleLine
+      ? titleLine.replace(/^title\s*:/i, '').trim()
+      : headingTitle
+        ? headingTitle.replace(/^#+\s*/, '').trim()
+        : `Draft contribution for ${issue.repoFullName}#${issue.number}`;
+
+    const body = prDraft.trim().length > 0
+      ? prDraft.trim()
+      : [
+        'Summary',
+        '',
+        `Draft contribution artifacts for ${issue.repoFullName}#${issue.number}.`,
+      ].join('\n');
+
+    return { title, body };
+  }
+
+  private async getUpstreamRepositoryContext(issue: RankedIssue): Promise<TargetRepoContext> {
+    const [owner, repo] = issue.repoFullName.split('/');
+    if (!owner || !repo) {
+      throw new Error(`Invalid issue repository reference: ${issue.repoFullName}`);
+    }
+
+    const repoInfo = await this.getGitHubRepositoryInfo(owner, repo);
+    return {
+      path: '',
+      owner,
+      repo,
+      defaultBranch: repoInfo.default_branch || 'main',
+    };
+  }
+
+  private async ensureForkRepository(upstreamRepo: TargetRepoContext): Promise<TargetRepoContext> {
+    if (!this.octokit) {
+      throw new Error('GitHub service not initialized');
+    }
+
+    const forkOwner = githubService.getUsername();
+
+    try {
+      const { data } = await this.octokit.rest.repos.get({
+        owner: forkOwner,
+        repo: upstreamRepo.repo,
+      });
+
+      if (!data.fork || data.parent?.full_name !== `${upstreamRepo.owner}/${upstreamRepo.repo}`) {
+        throw new Error(`Repository ${forkOwner}/${upstreamRepo.repo} exists but is not a fork of ${upstreamRepo.owner}/${upstreamRepo.repo}.`);
+      }
+
+      await this.syncForkWithUpstream(forkOwner, upstreamRepo.repo, data.default_branch || upstreamRepo.defaultBranch);
+      return {
+        path: '',
+        owner: forkOwner,
+        repo: upstreamRepo.repo,
+        defaultBranch: data.default_branch || upstreamRepo.defaultBranch,
+      };
+    } catch (error) {
+      const err = error as { status?: number };
+      if (err.status && err.status !== 404) {
+        throw error;
+      }
+    }
+
+    logger.info(`Creating fork for ${upstreamRepo.owner}/${upstreamRepo.repo}`);
+    await this.octokit.rest.repos.createFork({
+      owner: upstreamRepo.owner,
+      repo: upstreamRepo.repo,
+    });
+
+    const fork = await this.waitForFork(forkOwner, upstreamRepo.repo, `${upstreamRepo.owner}/${upstreamRepo.repo}`);
+    await this.syncForkWithUpstream(forkOwner, upstreamRepo.repo, fork.default_branch || upstreamRepo.defaultBranch);
+
+    return {
+      path: '',
+      owner: forkOwner,
+      repo: upstreamRepo.repo,
+      defaultBranch: fork.default_branch || upstreamRepo.defaultBranch,
+    };
+  }
+
+  private async waitForFork(owner: string, repo: string, expectedParent: string) {
+    if (!this.octokit) {
+      throw new Error('GitHub service not initialized');
+    }
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      try {
+        const { data } = await this.octokit.rest.repos.get({ owner, repo });
+        if (data.fork && data.parent?.full_name === expectedParent) {
+          return data;
+        }
+      } catch {
+        // Continue polling until the fork is visible.
+      }
+
+      await this.delay(1500);
+    }
+
+    throw new Error(`Fork ${owner}/${repo} was not ready in time.`);
+  }
+
+  private async syncForkWithUpstream(owner: string, repo: string, branch: string): Promise<void> {
+    if (!this.octokit) {
+      throw new Error('GitHub service not initialized');
+    }
+
+    try {
+      await this.octokit.rest.repos.mergeUpstream({
+        owner,
+        repo,
+        branch,
+      });
+    } catch (error) {
+      logger.debug(`Unable to sync fork ${owner}/${repo} with upstream before opening a PR`, error);
+    }
+  }
+
+  private async createCommitOnFork(input: {
+    forkRepo: TargetRepoContext;
+    branchName: string;
+    workspacePath: string;
+    changedFiles: string[];
+    commitMessage: string;
+  }): Promise<void> {
+    if (!this.octokit) {
+      throw new Error('GitHub service not initialized');
+    }
+
+    const branch = await this.octokit.rest.repos.getBranch({
+      owner: input.forkRepo.owner,
+      repo: input.forkRepo.repo,
+      branch: input.forkRepo.defaultBranch,
+    });
+
+    const baseCommitSha = branch.data.commit.sha;
+    const baseTreeSha = branch.data.commit.commit.tree.sha;
+
+    const tree = input.changedFiles.map((filePath) => ({
+      path: filePath,
+      mode: '100644' as const,
+      type: 'blob' as const,
+      content: readFileSync(join(input.workspacePath, filePath), 'utf-8'),
+    }));
+
+    const createdTree = await this.octokit.rest.git.createTree({
+      owner: input.forkRepo.owner,
+      repo: input.forkRepo.repo,
+      base_tree: baseTreeSha,
+      tree,
+    });
+
+    const createdCommit = await this.octokit.rest.git.createCommit({
+      owner: input.forkRepo.owner,
+      repo: input.forkRepo.repo,
+      message: input.commitMessage,
+      tree: createdTree.data.sha,
+      parents: [baseCommitSha],
+    });
+
+    try {
+      await this.octokit.rest.git.createRef({
+        owner: input.forkRepo.owner,
+        repo: input.forkRepo.repo,
+        ref: `refs/heads/${input.branchName}`,
+        sha: createdCommit.data.sha,
+      });
+    } catch (error) {
+      const err = error as { status?: number };
+      if (err.status !== 422) {
+        throw error;
+      }
+
+      await this.octokit.rest.git.updateRef({
+        owner: input.forkRepo.owner,
+        repo: input.forkRepo.repo,
+        ref: `heads/${input.branchName}`,
+        sha: createdCommit.data.sha,
+        force: true,
+      });
+    }
+  }
+
+  private async createContributionPullRequest(
+    upstreamRepo: TargetRepoContext,
+    forkOwner: string,
+    branchName: string,
+    draftPullRequest: DraftPullRequest,
+  ): Promise<{ url: string; number: number }> {
+    if (!this.octokit) {
+      throw new Error('GitHub service not initialized');
+    }
+
+    const existing = await this.octokit.rest.pulls.list({
+      owner: upstreamRepo.owner,
+      repo: upstreamRepo.repo,
+      head: `${forkOwner}:${branchName}`,
+      base: upstreamRepo.defaultBranch,
+      state: 'open',
+    });
+
+    if (existing.data.length > 0) {
+      return {
+        url: existing.data[0].html_url,
+        number: existing.data[0].number,
+      };
+    }
+
+    const { data } = await this.octokit.rest.pulls.create({
+      owner: upstreamRepo.owner,
+      repo: upstreamRepo.repo,
+      title: draftPullRequest.title,
+      body: draftPullRequest.body,
+      head: `${forkOwner}:${branchName}`,
+      base: upstreamRepo.defaultBranch,
+      draft: true,
+    });
+
+    return {
+      url: data.html_url,
+      number: data.number,
+    };
+  }
+
+  private buildContributionCommitMessage(issue: RankedIssue): string {
+    return `feat: address ${issue.repoFullName}#${issue.number} ${issue.title}`.slice(0, 120);
+  }
+
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      setTimeout(resolve, ms);
+    });
   }
 
   private async prepareLocalRepository(git: SimpleGit, defaultBranch: string, hasRemoteCommits: boolean): Promise<void> {
