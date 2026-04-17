@@ -3,8 +3,11 @@ import type { RestEndpointMethodTypes } from '@octokit/plugin-rest-endpoint-meth
 import type { GitHubIssue } from '../types/index.js';
 import { logger } from '../infra/logger.js';
 
-const FILTER_LABELS = ['good first issue', 'good-first-issue', 'help wanted', 'help-wanted'];
-const SEARCH_RESULTS_PER_LABEL = 50;
+const FILTER_LABEL_GROUPS = [
+  ['good first issue', 'good-first-issue'],
+  ['help wanted', 'help-wanted'],
+] as const;
+const SEARCH_RESULTS_PER_GROUP = 30;
 
 type SearchIssueItem =
   RestEndpointMethodTypes['search']['issuesAndPullRequests']['response']['data']['items'][number];
@@ -18,6 +21,12 @@ interface RepoIdentifier {
 interface RepoMetadata {
   description: string;
   stars: number;
+}
+
+interface SearchFailure {
+  labelGroup: readonly string[];
+  reason: string;
+  rateLimited: boolean;
 }
 
 export class GitHubService {
@@ -54,35 +63,46 @@ export class GitHubService {
     const seenIssueKeys = new Set<string>();
     const candidateItems: SearchIssueItem[] = [];
     const repoCache = new Map<string, RepoMetadata>();
+    const failures: SearchFailure[] = [];
 
     try {
-      for (const label of FILTER_LABELS) {
-        const searchQuery = this.buildSearchQuery(label);
-        const response = await this.octokit.rest.search.issuesAndPullRequests({
-          q: searchQuery,
-          sort: 'updated',
-          order: 'desc',
-          per_page: SEARCH_RESULTS_PER_LABEL,
-        });
+      for (const labelGroup of FILTER_LABEL_GROUPS) {
+        try {
+          const searchQuery = this.buildSearchQuery(labelGroup);
+          const response = await this.octokit.rest.search.issuesAndPullRequests({
+            q: searchQuery,
+            sort: 'updated',
+            order: 'desc',
+            per_page: SEARCH_RESULTS_PER_GROUP,
+          });
 
-        logger.debug(`Search query: ${searchQuery}`);
-        logger.debug(`Total results for "${label}": ${response.data.total_count}`);
+          logger.debug(`Search query: ${searchQuery}`);
+          logger.debug(`Total results for "${labelGroup.join(' / ')}": ${response.data.total_count}`);
 
-        for (const item of response.data.items) {
-          if (!this.shouldIncludeIssue(item)) {
-            continue;
+          for (const item of response.data.items) {
+            if (!this.shouldIncludeIssue(item)) {
+              continue;
+            }
+
+            const repoId = this.parseRepositoryUrl(item.repository_url);
+            const issueKey = `${repoId.fullName}#${item.number}`;
+
+            if (seenIssueKeys.has(issueKey)) {
+              continue;
+            }
+
+            seenIssueKeys.add(issueKey);
+            candidateItems.push(item);
           }
-
-          const repoId = this.parseRepositoryUrl(item.repository_url);
-          const issueKey = `${repoId.fullName}#${item.number}`;
-
-          if (seenIssueKeys.has(issueKey)) {
-            continue;
-          }
-
-          seenIssueKeys.add(issueKey);
-          candidateItems.push(item);
+        } catch (error) {
+          const failure = this.describeSearchFailure(error);
+          failures.push({ labelGroup, ...failure });
+          logger.warn(`Issue search failed for labels "${labelGroup.join('" / "')}". ${failure.reason}`);
         }
+      }
+
+      if (candidateItems.length === 0 && failures.length > 0) {
+        throw new Error(this.buildDiscoveryFailureMessage(failures));
       }
 
       candidateItems.sort((left, right) =>
@@ -109,8 +129,12 @@ export class GitHubService {
         });
       }
 
-      logger.success(`Fetched ${issues.length} trending issues from ${FILTER_LABELS.length} label searches`);
+      logger.success(`Fetched ${issues.length} trending issues from ${FILTER_LABEL_GROUPS.length} label searches`);
     } catch (error) {
+      if (error instanceof Error && error.message.startsWith('GitHub issue discovery')) {
+        throw error;
+      }
+
       logger.debug('Failed to fetch trending issues', error);
       throw new Error('GitHub issue discovery failed. Please try again in a moment.');
     }
@@ -133,8 +157,9 @@ export class GitHubService {
     return this.username;
   }
 
-  private buildSearchQuery(label: string): string {
-    return `label:"${label}" archived:false is:issue is:open no:assignee`;
+  private buildSearchQuery(labels: readonly string[]): string {
+    const joinedLabels = labels.map((label) => `label:"${label}"`).join(' OR ');
+    return `(${joinedLabels}) archived:false is:issue is:open no:assignee`;
   }
 
   private shouldIncludeIssue(item: SearchIssueItem): boolean {
@@ -221,6 +246,39 @@ export class GitHubService {
         return label.name ?? '';
       })
       .filter(Boolean);
+  }
+
+  private describeSearchFailure(error: unknown): { reason: string; rateLimited: boolean } {
+    const err = error as { status?: number; message?: string };
+
+    if (err.status === 403) {
+      return {
+        reason: 'GitHub Search API returned 403. This usually means rate limiting or secondary throttling.',
+        rateLimited: true,
+      };
+    }
+
+    if (err.status === 422) {
+      return {
+        reason: 'GitHub Search API rejected the query.',
+        rateLimited: false,
+      };
+    }
+
+    return {
+      reason: err.message || 'Unknown GitHub API error.',
+      rateLimited: false,
+    };
+  }
+
+  private buildDiscoveryFailureMessage(failures: SearchFailure[]): string {
+    const rateLimited = failures.some((failure) => failure.rateLimited);
+
+    if (rateLimited) {
+      return 'GitHub issue discovery failed because the Search API is currently rate-limited. Wait a few minutes and retry, or reduce request frequency.';
+    }
+
+    return `GitHub issue discovery failed for all label groups: ${failures.map((failure) => failure.labelGroup.join('/')).join(', ')}.`;
   }
 }
 
