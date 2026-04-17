@@ -181,10 +181,8 @@ export class InitOrchestrator {
 
     ui.section('Step 3 · Your matching profile', 'Choose the stack and focus areas that should influence issue scoring.');
 
-    const { techStack, proficiency, focusAreas } = await prompt<{
+    const { techStack } = await prompt<{
       techStack: string[];
-      proficiency: UserProficiency;
-      focusAreas: string[];
     }>([
       {
         type: 'checkbox',
@@ -197,17 +195,21 @@ export class InitOrchestrator {
         })),
         validate: (input: string[]) => input.length > 0 || 'Select at least one technology',
       },
-      {
-        type: 'list',
-        name: 'proficiency',
-        message: '  Select your current proficiency level:',
-        default: config.userProfile.proficiency,
-        choices: [
-          { name: 'Beginner', value: 'beginner' },
-          { name: 'Intermediate', value: 'intermediate' },
-          { name: 'Advanced', value: 'advanced' },
-        ],
-      },
+    ]);
+
+    const proficiency = await selectPrompt<UserProficiency>({
+      message: 'Select your current proficiency level:',
+      default: config.userProfile.proficiency,
+      choices: [
+        { name: 'Beginner', value: 'beginner', description: 'New to the stack, prefer guided issues.' },
+        { name: 'Intermediate', value: 'intermediate', description: 'Comfortable with the stack, can handle moderate tasks.' },
+        { name: 'Advanced', value: 'advanced', description: 'Deep experience, ready for complex changes.' },
+      ],
+    });
+
+    const { focusAreas } = await prompt<{
+      focusAreas: string[];
+    }>([
       {
         type: 'checkbox',
         name: 'focusAreas',
