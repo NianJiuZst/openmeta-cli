@@ -143,15 +143,11 @@ function renderBrandMark(capabilities: UiCapabilities, tone: Tone = 'accent'): s
     }
   })();
 
-  return lines.map((line, index) => {
-    const slantedLine = `${' '.repeat(index)}${line}`;
+  if (!capabilities.supportsColor) {
+    return lines;
+  }
 
-    if (!capabilities.supportsColor) {
-      return slantedLine;
-    }
-
-    return chalk.bold.italic(gradientForTone(slantedLine));
-  });
+  return gradientForTone.multiline(lines.join('\n')).split('\n').map((line) => chalk.bold(line));
 }
 
 function renderRule(capabilities: UiCapabilities, tone: Tone, width: number): string {
