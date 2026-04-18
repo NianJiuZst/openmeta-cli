@@ -38,7 +38,7 @@ export async function runTask<T>(
     process.stdout.write(`${renderStatusLine('[>]', options.title, color)}\n`);
     try {
       const result = await task();
-      process.stdout.write(`${renderStatusLine('[ok]', options.doneMessage || options.title, chalk.greenBright)}\n`);
+      process.stdout.write(`${renderStatusLine('[success]', options.doneMessage || options.title, chalk.greenBright)}\n`);
       return result;
     } catch (error) {
       process.stdout.write(`${renderStatusLine('[x]', options.failedMessage || options.title, chalk.redBright)}\n`);
@@ -69,7 +69,7 @@ export async function runTask<T>(
     } else {
       process.stdout.write('\r');
     }
-    process.stdout.write(`${renderStatusLine('[ok]', options.doneMessage || options.title, chalk.greenBright)}\n`);
+    process.stdout.write(`${renderStatusLine('[success]', options.doneMessage || options.title, chalk.greenBright)}\n`);
     return result;
   } catch (error) {
     clearInterval(timer);

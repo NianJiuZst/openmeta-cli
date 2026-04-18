@@ -6,6 +6,7 @@ export async function runCommand(
 ): Promise<void> {
   try {
     await task();
+    ui.commandCompleted(commandName);
   } catch (error) {
     if (isUserCancelledError(error)) {
       ui.commandCancelled(commandName);

@@ -15,6 +15,8 @@ import type {
   UiCapabilities,
 } from './types.js';
 
+type CardVariant = 'standard' | 'hero' | 'celebration';
+
 interface BoxChars {
   topLeft: string;
   topRight: string;
@@ -24,8 +26,19 @@ interface BoxChars {
   vertical: string;
 }
 
-function boxChars(capabilities: UiCapabilities): BoxChars {
+function boxChars(capabilities: UiCapabilities, variant: CardVariant = 'standard'): BoxChars {
   if (capabilities.supportsUnicode) {
+    if (variant !== 'standard') {
+      return {
+        topLeft: '╔',
+        topRight: '╗',
+        bottomLeft: '╚',
+        bottomRight: '╝',
+        horizontal: '═',
+        vertical: '║',
+      };
+    }
+
     return {
       topLeft: '┌',
       topRight: '┐',
@@ -82,10 +95,32 @@ function toneAccent(tone: Tone): (text: string) => string {
   }
 }
 
+function toneBadge(tone: Tone): (text: string) => string {
+  switch (tone) {
+    case 'success':
+      return chalk.black.bgGreenBright;
+    case 'warning':
+      return chalk.black.bgYellowBright;
+    case 'error':
+      return chalk.white.bgRedBright;
+    case 'muted':
+      return chalk.black.bgWhite;
+    case 'accent':
+      return chalk.black.bgMagentaBright;
+    case 'info':
+    default:
+      return chalk.black.bgCyanBright;
+  }
+}
+
+function bulletSymbol(capabilities: UiCapabilities): string {
+  return capabilities.supportsUnicode ? '✦' : '*';
+}
+
 function statusSymbol(state: StepState): string {
   switch (state) {
     case 'done':
-      return '[ok]';
+      return '[success]';
     case 'active':
       return '[>]';
     case 'error':
@@ -114,18 +149,28 @@ function printBlankLine(): void {
   process.stdout.write('\n');
 }
 
-function printCard(capabilities: UiCapabilities, options: CardOptions): void {
-  const chars = boxChars(capabilities);
-  const width = Math.max(52, Math.min(capabilities.width - 2, 106));
+function printCard(capabilities: UiCapabilities, options: CardOptions, variant: CardVariant = 'standard'): void {
+  const chars = boxChars(capabilities, variant);
+  const width = variant === 'standard'
+    ? Math.max(52, Math.min(capabilities.width - 2, 106))
+    : Math.max(60, Math.min(capabilities.width - 2, 112));
   const innerWidth = width - 4;
   const color = toneColor(options.tone ?? 'info');
   const accent = toneAccent(options.tone ?? 'info');
+  const badge = toneBadge(options.tone ?? 'info');
+  const bullet = bulletSymbol(capabilities);
+  const separator = accent(chars.horizontal.repeat(Math.min(28, innerWidth)));
+
+  const renderedLines = variant === 'standard'
+    ? (options.lines ? wrapLines(options.lines, innerWidth) : [])
+    : (options.lines ?? []).flatMap((line) => wrapLine(`${bullet} ${line}`, innerWidth));
 
   const content = [
-    ...(options.label ? [accent(options.label.toUpperCase())] : []),
-    chalk.bold(options.title),
+    ...(options.label ? [badge(` ${options.label.toUpperCase()} `)] : []),
+    variant === 'standard' ? chalk.bold(options.title) : chalk.whiteBright.bold(options.title),
     ...(options.subtitle ? wrapLine(options.subtitle, innerWidth).map((line) => chalk.gray(line)) : []),
-    ...(options.lines ? wrapLines(options.lines, innerWidth) : []),
+    ...(variant === 'standard' || renderedLines.length === 0 ? [] : [separator]),
+    ...renderedLines,
   ];
 
   const top = `${chars.topLeft}${chars.horizontal.repeat(width - 2)}${chars.topRight}`;
@@ -141,9 +186,10 @@ function printCard(capabilities: UiCapabilities, options: CardOptions): void {
 
 function printSection(capabilities: UiCapabilities, title: string, subtitle?: string): void {
   const width = Math.max(44, Math.min(capabilities.width - 2, 106));
-  const rule = '-'.repeat(Math.max(12, width - visibleLength(title) - 3));
+  const dash = capabilities.supportsUnicode ? '─' : '-';
+  const rule = dash.repeat(Math.max(12, width - visibleLength(title) - 3));
   printBlankLine();
-  process.stdout.write(`${chalk.cyanBright(title)} ${chalk.gray(rule)}\n`);
+  process.stdout.write(`${chalk.cyanBright.bold(title)} ${chalk.gray(rule)}\n`);
   if (subtitle) {
     for (const line of wrapLine(subtitle, width)) {
       process.stdout.write(`${chalk.gray(line)}\n`);
@@ -240,10 +286,11 @@ function printTimeline(capabilities: UiCapabilities, title: string, items: Timel
 
 function printRecordList(capabilities: UiCapabilities, title: string, items: RecordItem[]): void {
   printSection(capabilities, title);
+  const marker = capabilities.supportsUnicode ? '◆' : '*';
 
   for (const item of items) {
     const accent = toneColor(item.tone ?? 'info');
-    process.stdout.write(`  ${accent('*')} ${accent(item.title)}\n`);
+    process.stdout.write(`  ${accent(marker)} ${accent(item.title)}\n`);
     if (item.subtitle) {
       for (const line of wrapLine(item.subtitle, Math.max(36, capabilities.width - 10))) {
         process.stdout.write(`      ${chalk.gray(line)}\n`);
@@ -276,6 +323,83 @@ function maskSecret(secret?: string): string {
   return `***${secret.slice(-4)}`;
 }
 
+function completionCopy(commandName: string): Pick<CardOptions, 'title' | 'subtitle' | 'lines' | 'tone'> {
+  switch (commandName) {
+    case 'OpenMeta Agent':
+      return {
+        title: 'The contribution arc closed cleanly',
+        subtitle: 'Signal, context, draft, and artifacts have all settled into a readable end state.',
+        lines: [
+          'Review the panels above, then either ship the next move or let the loop rest.',
+        ],
+        tone: 'success',
+      };
+    case 'OpenMeta Init':
+      return {
+        title: 'The setup ritual landed without drift',
+        subtitle: 'Credentials, profile, and automation posture are now aligned for the next run.',
+        lines: [
+          'The terminal is quiet again, and the path forward is explicit.',
+        ],
+        tone: 'success',
+      };
+    case 'OpenMeta Scout':
+      return {
+        title: 'The field has been read and narrowed',
+        subtitle: 'The shortlist above is ready for a deliberate next decision.',
+        lines: [
+          'Spend attention where the signal is strongest.',
+        ],
+        tone: 'success',
+      };
+    case 'OpenMeta Config':
+      return {
+        title: 'The control surface is in a clean state',
+        subtitle: 'Configuration output finished without interruption.',
+        lines: [
+          'If something still looks off, the panels above are now easy to inspect.',
+        ],
+        tone: 'success',
+      };
+    case 'OpenMeta Automation':
+      return {
+        title: 'The scheduler state settled cleanly',
+        subtitle: 'Automation policy and local state are now speaking the same language.',
+        lines: [
+          'Leave it running, or reshape the cadence whenever you want.',
+        ],
+        tone: 'success',
+      };
+    case 'OpenMeta Inbox':
+      return {
+        title: 'The shortlist is current and ready',
+        subtitle: 'Drafted opportunities have been surfaced in a form meant for quick return.',
+        lines: [
+          'Come back when you want the next smart starting point.',
+        ],
+        tone: 'success',
+      };
+    case 'OpenMeta PoW':
+      return {
+        title: 'The ledger is closed and readable',
+        subtitle: 'Every recorded run above now sits in a stable, reviewable trail.',
+        lines: [
+          'You can trace momentum without digging through raw files.',
+        ],
+        tone: 'success',
+      };
+    default:
+      return {
+        title: 'Execution sealed cleanly',
+        subtitle: 'OpenMeta finished this command without interruption.',
+        lines: [
+          'The terminal is back in a known, stable state.',
+        ],
+        tone: 'success',
+      };
+  }
+}
+
 const capabilities = getUiCapabilities();
 
 export const ui = {
@@ -287,7 +411,7 @@ export const ui = {
     printCard(capabilities, {
       ...options,
       tone: options.tone ?? 'accent',
-    });
+    }, 'hero');
   },
 
   card(options: CardOptions): void {
@@ -332,6 +456,14 @@ export const ui = {
 
   maskSecret(secret?: string): string {
     return maskSecret(secret);
+  },
+
+  commandCompleted(commandName: string): void {
+    const copy = completionCopy(commandName);
+    printCard(capabilities, {
+      label: commandName,
+      ...copy,
+    }, 'celebration');
   },
 
   async task<T>(options: TaskOptions, task: () => Promise<T>): Promise<T> {
