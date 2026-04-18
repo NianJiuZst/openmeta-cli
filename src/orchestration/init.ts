@@ -68,31 +68,26 @@ const FOCUS_AREA_CHOICES = [
 
 type SetupStepId = 'github' | 'llm' | 'profile' | 'targetRepo' | 'automation';
 
-const SETUP_STEPS: Array<{ id: SetupStepId; label: string; description: string }> = [
+const SETUP_STEPS: Array<{ id: SetupStepId; label: string }> = [
   {
     id: 'github',
     label: 'GitHub access',
-    description: 'Verify repository discovery credentials.',
   },
   {
     id: 'llm',
     label: 'LLM provider',
-    description: 'Connect the model used for ranking and draft generation.',
   },
   {
     id: 'profile',
     label: 'Matching profile',
-    description: 'Capture stack, proficiency, and focus areas for issue scoring.',
   },
   {
     id: 'targetRepo',
     label: 'Target repository',
-    description: 'Choose where OpenMeta publishes contribution artifacts.',
   },
   {
     id: 'automation',
     label: 'Automation policy',
-    description: 'Define whether the autonomous loop should run unattended.',
   },
 ];
 
@@ -440,7 +435,6 @@ export class InitOrchestrator {
       tone: schedulerResult.status === 'failed' ? 'warning' : 'success',
     });
 
-    this.renderStep('automation', completedSteps, 'All setup steps are complete.');
     ui.stats('Setup summary', [
       { label: 'GitHub', value: username, tone: 'success' },
       { label: 'Model', value: modelValue, hint: selectedProvider!.name, tone: 'success' },
@@ -578,21 +572,10 @@ export class InitOrchestrator {
     failed: boolean = false,
   ): void {
     const currentIndex = SETUP_STEPS.findIndex((step) => step.id === currentStep);
-
-    ui.stepper('Setup progress', SETUP_STEPS.map((step, index) => ({
-      label: step.label,
-      description: step.description,
-      state: completedSteps.has(step.id)
-        ? 'done'
-        : step.id === currentStep
-          ? (failed ? 'error' : 'active')
-          : index < currentIndex
-            ? 'done'
-            : 'pending',
-    })));
+    const stateLabel = failed ? 'needs attention' : completedSteps.has(currentStep) ? '[success]' : 'in progress';
 
     ui.section(
-      `Step ${currentIndex + 1} · ${SETUP_STEPS[currentIndex]?.label || currentStep}`,
+      `Step ${currentIndex + 1} of ${SETUP_STEPS.length} · ${SETUP_STEPS[currentIndex]?.label || currentStep} · ${stateLabel}`,
       subtitle,
     );
   }
