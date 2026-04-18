@@ -30,6 +30,7 @@
     "cosmiconfig": "^9.0.1",
     "crypto-js": "^4.2.0",
     "figures": "^6.1.0",
+    "gradient-string": "^3.0.0",
     "openai": "^6.34.0",
     "simple-git": "^3.35.2"
   }
