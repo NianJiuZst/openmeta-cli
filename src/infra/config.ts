@@ -6,7 +6,7 @@ import { CryptoService } from './crypto.js';
 import { logger } from './logger.js';
 
 function getConfigDirPath(): string {
-  return process.env.OPENMETA_CONFIG_DIR || join(homedir(), '.config', 'openmeta');
+  return process.env['OPENMETA_CONFIG_DIR'] || join(homedir(), '.config', 'openmeta');
 }
 
 function getConfigFilePath(): string {

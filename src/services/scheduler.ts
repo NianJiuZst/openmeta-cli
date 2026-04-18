@@ -200,7 +200,7 @@ export class SchedulerService {
 
     mkdirSync(logDir, { recursive: true });
 
-    const cronLine = `${minute} ${hour} * * * PATH=${this.shellEscape(process.env.PATH || DEFAULT_PATH)} HOME=${this.shellEscape(homedir())} ${this.buildCommandString(context)} >> ${this.shellEscape(stdoutPath)} 2>> ${this.shellEscape(stderrPath)} ${CRON_TAG}`;
+    const cronLine = `${minute} ${hour} * * * PATH=${this.shellEscape(process.env['PATH'] || DEFAULT_PATH)} HOME=${this.shellEscape(homedir())} ${this.buildCommandString(context)} >> ${this.shellEscape(stdoutPath)} 2>> ${this.shellEscape(stderrPath)} ${CRON_TAG}`;
 
     const lines = currentCron.content
       .split(/\r?\n/)
@@ -374,7 +374,7 @@ export class SchedulerService {
     stderrPath: string;
     workingDirectory: string;
   }): string {
-    const pathValue = this.escapeXml(process.env.PATH || DEFAULT_PATH);
+    const pathValue = this.escapeXml(process.env['PATH'] || DEFAULT_PATH);
 
     return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

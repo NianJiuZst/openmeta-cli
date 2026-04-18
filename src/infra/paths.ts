@@ -4,7 +4,7 @@ import { dirname, join } from 'path';
 import { configService } from './config.js';
 
 export function getOpenMetaHomePath(): string {
-  return process.env.OPENMETA_HOME || join(homedir(), '.openmeta');
+  return process.env['OPENMETA_HOME'] || join(homedir(), '.openmeta');
 }
 
 export function getOpenMetaWorkspaceRoot(): string {

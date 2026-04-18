@@ -244,10 +244,10 @@ export class WorkspaceService {
         const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8')) as { scripts?: Record<string, string> };
         const scripts = packageJson.scripts ?? {};
 
-        if (scripts.test) commands.push({ command: 'npm test -- --runInBand', reason: 'Detected package.json test script' });
-        if (scripts.lint) commands.push({ command: 'npm run lint', reason: 'Detected package.json lint script' });
-        if (scripts.typecheck) commands.push({ command: 'npm run typecheck', reason: 'Detected package.json typecheck script' });
-        if (scripts.build) commands.push({ command: 'npm run build', reason: 'Detected package.json build script' });
+        if (scripts['test']) commands.push({ command: 'npm test -- --runInBand', reason: 'Detected package.json test script' });
+        if (scripts['lint']) commands.push({ command: 'npm run lint', reason: 'Detected package.json lint script' });
+        if (scripts['typecheck']) commands.push({ command: 'npm run typecheck', reason: 'Detected package.json typecheck script' });
+        if (scripts['build']) commands.push({ command: 'npm run build', reason: 'Detected package.json build script' });
       } catch (error) {
         logger.debug('Unable to parse package.json for test command detection', error);
       }

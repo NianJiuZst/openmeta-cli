@@ -4,7 +4,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import CryptoJS from 'crypto-js';
 
-const CONFIG_DIR = process.env.OPENMETA_CONFIG_DIR || join(homedir(), '.config', 'openmeta');
+const CONFIG_DIR = process.env['OPENMETA_CONFIG_DIR'] || join(homedir(), '.config', 'openmeta');
 const KEY_FILE = join(CONFIG_DIR, 'secret.key');
 const ENCRYPTION_PREFIX = 'enc:v2';
 const LEGACY_ENCRYPTION_KEY = 'openmeta-cli-encryption-key-v1';

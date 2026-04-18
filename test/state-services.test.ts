@@ -17,13 +17,13 @@ function createIsolatedDir(): string {
 describe('stateful services', () => {
   beforeEach(() => {
     tempRoot = createIsolatedDir();
-    process.env.OPENMETA_CONFIG_DIR = join(tempRoot, '.config', 'openmeta');
-    process.env.OPENMETA_HOME = join(tempRoot, '.openmeta');
+    process.env['OPENMETA_CONFIG_DIR'] = join(tempRoot, '.config', 'openmeta');
+    process.env['OPENMETA_HOME'] = join(tempRoot, '.openmeta');
   });
 
   afterEach(() => {
-    delete process.env.OPENMETA_CONFIG_DIR;
-    delete process.env.OPENMETA_HOME;
+    delete process.env['OPENMETA_CONFIG_DIR'];
+    delete process.env['OPENMETA_HOME'];
 
     if (tempRoot) {
       rmSync(tempRoot, { recursive: true, force: true });

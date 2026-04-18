@@ -8,7 +8,7 @@ export class Logger {
 
   constructor(prefix: string = '') {
     this.prefix = prefix;
-    this.debugEnabled = process.env.OPENMETA_DEBUG === '1';
+    this.debugEnabled = process.env['OPENMETA_DEBUG'] === '1';
   }
 
   private log(level: LogLevel, message: string, ...args: unknown[]): void {
