@@ -61,6 +61,12 @@ interface ContributionPullRequestResult {
   validationResults: TestResult[];
 }
 
+interface ConcretePatchResult {
+  changedFiles: string[];
+  validationResults: TestResult[];
+  reviewRequired: boolean;
+}
+
 type AgentStageId = 'scout' | 'select' | 'prepare' | 'draft' | 'validate' | 'pr' | 'publish';
 const ARTIFACT_PUBLISH_BRANCH = 'openmeta-artifacts';
 
@@ -205,6 +211,7 @@ export class AgentOrchestrator {
       : {
         changedFiles: [],
         validationResults: workspace.testResults,
+        reviewRequired: true,
       };
     completedStages.add('draft');
     const workspaceForArtifacts: RepoWorkspaceContext = {
@@ -327,17 +334,40 @@ export class AgentOrchestrator {
       pullRequestUrl: contributionPullRequest.url,
     });
 
+    const reviewRequired =
+      patchDraftResult.status !== 'success'
+      || implementation.reviewRequired
+      || prDraftResult.status !== 'success';
     const finalProofRecord = {
       ...proofRecord,
       published: publishResult.published,
     };
+    const finalMemory = memoryService.recordOutcome({
+      issue: selectedIssue,
+      workspace: workspaceForArtifacts,
+      changedFiles: implementation.changedFiles,
+      validationResults: implementation.validationResults,
+      published: publishResult.published,
+      pullRequestUrl: contributionPullRequest.url,
+      reviewRequired,
+    });
     proofOfWorkService.record(finalProofRecord);
+    const finalProofMarkdown = proofOfWorkService.renderMarkdown(proofOfWorkService.load().records);
+    this.writeLocalArtifacts({
+      artifacts,
+      dossier,
+      patchDraftMarkdown,
+      prDraftMarkdown,
+      memoryMarkdown: memoryService.renderMarkdown(finalMemory),
+      inboxMarkdown: inboxService.renderMarkdown(inboxItems),
+      proofMarkdown: finalProofMarkdown,
+    });
     completedStages.add('publish');
 
     this.showResult({
       issue: selectedIssue,
       workspace: workspaceForArtifacts,
-      memory,
+      memory: finalMemory,
       patchDraft,
       prDraft,
       dossier,
@@ -842,7 +872,7 @@ export class AgentOrchestrator {
     workspace: RepoWorkspaceContext,
     patchDraft: PatchDraft,
     runChecks: boolean,
-  ): Promise<{ changedFiles: string[]; validationResults: TestResult[] }> {
+  ): Promise<ConcretePatchResult> {
     try {
       const implementation = await ui.task({
         title: 'Generating concrete patch',
@@ -862,6 +892,7 @@ export class AgentOrchestrator {
         return {
           changedFiles: [],
           validationResults: workspace.testResults,
+          reviewRequired: true,
         };
       }
 
@@ -877,6 +908,7 @@ export class AgentOrchestrator {
         return {
           changedFiles: [],
           validationResults: workspace.testResults,
+          reviewRequired: false,
         };
       }
 
@@ -904,6 +936,7 @@ export class AgentOrchestrator {
         return {
           changedFiles: [],
           validationResults: workspace.testResults,
+          reviewRequired: false,
         };
       }
 
@@ -935,12 +968,14 @@ export class AgentOrchestrator {
       return {
         changedFiles,
         validationResults,
+        reviewRequired: false,
       };
     } catch (error) {
       logger.warn('OpenMeta could not generate or apply a safe concrete patch. Continuing with research artifacts only.', error);
       return {
         changedFiles: [],
         validationResults: workspace.testResults,
+        reviewRequired: false,
       };
     }
   }
@@ -1259,7 +1294,7 @@ export class AgentOrchestrator {
     patchDraft: PatchDraft;
     changedFiles: string[];
     validationResults: TestResult[];
-  }): Promise<{ changedFiles: string[]; validationResults: TestResult[] } | null> {
+  }): Promise<ConcretePatchResult | null> {
     if (input.workspace.validationCommands.length === 0) {
       return null;
     }
@@ -1296,7 +1331,11 @@ export class AgentOrchestrator {
         ],
       });
       logger.warn('Skipping validation repair because the generated patch requires review.');
-      return null;
+      return {
+        changedFiles: input.changedFiles,
+        validationResults: input.validationResults,
+        reviewRequired: true,
+      };
     }
 
     if (repairDraft.data.fileChanges.length === 0) {
@@ -1329,6 +1368,7 @@ export class AgentOrchestrator {
     return {
       changedFiles: [...new Set([...input.changedFiles, ...repairedFiles])],
       validationResults,
+      reviewRequired: false,
     };
   }
 

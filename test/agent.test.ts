@@ -45,6 +45,7 @@ interface AgentInternals {
       passed: boolean;
       output: string;
     }>;
+    reviewRequired: boolean;
   }>;
 }
 
@@ -186,6 +187,7 @@ describe('AgentOrchestrator draft PR parsing', () => {
       expect(validationRuns).toBe(2);
       expect(result.changedFiles).toEqual(['src/app.ts']);
       expect(result.validationResults[0]?.passed).toBe(true);
+      expect(result.reviewRequired).toBe(false);
       expect(readFileSync(join(workspacePath, 'src', 'app.ts'), 'utf-8')).toBe('export const version = 2;\n');
     } finally {
       llmService.generateImplementationDraft = originalGenerateImplementationDraft;
@@ -235,9 +237,87 @@ describe('AgentOrchestrator draft PR parsing', () => {
       );
 
       expect(result.changedFiles).toEqual([]);
+      expect(result.reviewRequired).toBe(true);
       expect(readFileSync(join(workspacePath, 'src', 'app.ts'), 'utf-8')).toBe('export const version = 0;\n');
     } finally {
       llmService.generateImplementationDraft = originalGenerateImplementationDraft;
+    }
+  });
+
+  test('marks the run as review-required when validation repair needs manual review', async () => {
+    const workspacePath = mkdtempSync(join(tmpdir(), 'openmeta-agent-repair-review-'));
+    tempDirs.push(workspacePath);
+    mkdirSync(join(workspacePath, 'src'), { recursive: true });
+    writeFileSync(join(workspacePath, 'src', 'app.ts'), 'export const version = 0;\n', 'utf-8');
+
+    const originalGenerateImplementationDraft = llmService.generateImplementationDraft;
+    const originalGenerateImplementationRepairDraft = llmService.generateImplementationRepairDraft;
+    const originalRunValidationCommands = workspaceService.runValidationCommands;
+
+    let validationRuns = 0;
+
+    try {
+      llmService.generateImplementationDraft = async () => ({
+        version: '1',
+        kind: 'implementation_draft',
+        status: 'success',
+        data: {
+          summary: 'Initial patch',
+          fileChanges: [
+            {
+              path: 'src/app.ts',
+              reason: 'Apply the initial implementation',
+              content: 'export const version = 1;\n',
+            },
+          ],
+        },
+      });
+
+      llmService.generateImplementationRepairDraft = async () => ({
+        version: '1',
+        kind: 'implementation_draft',
+        status: 'needs_review',
+        data: {
+          summary: 'The repair requires manual inspection.',
+          fileChanges: [
+            {
+              path: 'src/app.ts',
+              reason: 'Candidate repair that should not be auto-applied',
+              content: 'export const version = 2;\n',
+            },
+          ],
+        },
+      });
+
+      workspaceService.runValidationCommands = () => {
+        validationRuns += 1;
+        return [{ command: 'pytest', exitCode: 1, passed: false, output: 'AssertionError: expected version 2' }];
+      };
+
+      const orchestrator = new AgentOrchestrator() as unknown as AgentInternals;
+      const result = await orchestrator.generateConcretePatch(
+        createRankedIssue(),
+        createWorkspace({
+          workspacePath,
+          snippets: [{ path: 'src/app.ts', content: 'export const version = 0;\n' }],
+          testCommands: [{ command: 'pytest', reason: 'Detected pyproject.toml', source: 'tool-default' }],
+          validationCommands: [{ command: 'pytest', reason: 'Detected pyproject.toml', source: 'tool-default' }],
+          validationWarnings: [],
+          testResults: [],
+        }),
+        createPatchDraft(),
+        true,
+      );
+
+      expect(validationRuns).toBe(1);
+      expect(result.changedFiles).toEqual(['src/app.ts']);
+      expect(result.validationResults[0]?.passed).toBe(false);
+      expect(result.reviewRequired).toBe(true);
+      expect(readFileSync(join(workspacePath, 'src', 'app.ts'), 'utf-8')).toBe('export const version = 1;\n');
+    } finally {
+      llmService.generateImplementationDraft = originalGenerateImplementationDraft;
+      llmService.generateImplementationRepairDraft = originalGenerateImplementationRepairDraft;
+      workspaceService.runValidationCommands = originalRunValidationCommands;
     }
   });
 });
