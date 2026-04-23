@@ -184,12 +184,13 @@ export class AgentOrchestrator {
     this.showWorkspaceSummary(workspace, memory);
 
     this.renderAgentStage('draft', completedStages, 'Drafting patch strategy and turning it into concrete file changes.');
-    const patchDraft = await ui.task({
+    const patchDraftResult = await ui.task({
       title: 'Generating patch strategy',
       doneMessage: 'Patch strategy generated',
       failedMessage: 'Patch strategy generation failed',
       tone: 'info',
     }, async () => llmService.generatePatchDraft(selectedIssue, workspace, memory));
+    const patchDraft = patchDraftResult.data;
     const implementation = await this.generateConcretePatch(selectedIssue, workspace, patchDraft, runChecks);
     completedStages.add('draft');
     const workspaceForArtifacts: RepoWorkspaceContext = {
@@ -202,12 +203,13 @@ export class AgentOrchestrator {
     completedStages.add('validate');
 
     this.renderAgentStage('pr', completedStages, 'Drafting PR narrative and deciding whether to open a real draft PR.');
-    const prDraft = await ui.task({
+    const prDraftResult = await ui.task({
       title: 'Generating PR narrative',
       doneMessage: 'PR narrative generated',
       failedMessage: 'PR narrative generation failed',
       tone: 'info',
     }, async () => llmService.generatePrDraft(selectedIssue, patchDraft, workspaceForArtifacts));
+    const prDraft = prDraftResult.data;
     const patchDraftMarkdown = contentService.formatPatchDraftMarkdown(patchDraft);
     const prDraftMarkdown = contentService.formatPullRequestDraftMarkdown(prDraft);
 
@@ -704,7 +706,7 @@ export class AgentOrchestrator {
     for (let start = 0; start < Math.min(issues.length, 80); start += batchSize) {
       const batch = issues.slice(start, start + batchSize);
       const scoredBatch = await llmService.scoreIssues(userProfile, batch);
-      matches.push(...scoredBatch);
+      matches.push(...scoredBatch.data);
       if (matches.length >= 20) {
         break;
       }
@@ -821,7 +823,7 @@ export class AgentOrchestrator {
         failedMessage: 'Concrete patch generation failed',
         tone: 'info',
       }, async () => llmService.generateImplementationDraft(issue, workspace, patchDraft));
-      if (implementation.fileChanges.length === 0) {
+      if (implementation.data.fileChanges.length === 0) {
         ui.callout({
           label: 'OpenMeta Agent',
           title: 'Concrete patch not produced',
@@ -836,18 +838,18 @@ export class AgentOrchestrator {
         };
       }
 
-      ui.timeline('Generated patch plan', implementation.fileChanges.slice(0, 6).map((change) => ({
+      ui.timeline('Generated patch plan', implementation.data.fileChanges.slice(0, 6).map((change) => ({
         title: change.path,
         subtitle: change.reason,
         state: 'done',
       })));
 
       const changedFiles = await ui.task({
-        title: `Applying ${implementation.fileChanges.length} generated file edit(s)`,
+        title: `Applying ${implementation.data.fileChanges.length} generated file edit(s)`,
         doneMessage: 'Generated file edits applied',
         failedMessage: 'Generated file edits failed to apply',
         tone: 'info',
-      }, async () => workspaceService.applyGeneratedChanges(workspace.workspacePath, implementation.fileChanges));
+      }, async () => workspaceService.applyGeneratedChanges(workspace.workspacePath, implementation.data.fileChanges));
       if (changedFiles.length === 0) {
         ui.callout({
           label: 'OpenMeta Agent',
@@ -1233,17 +1235,17 @@ export class AgentOrchestrator {
       currentFiles,
     ));
 
-    if (repairDraft.fileChanges.length === 0) {
+    if (repairDraft.data.fileChanges.length === 0) {
       logger.warn('Validation repair pass did not produce any additional safe file edits.');
       return null;
     }
 
     const repairedFiles = await ui.task({
-      title: `Applying ${repairDraft.fileChanges.length} repair edit(s)`,
+      title: `Applying ${repairDraft.data.fileChanges.length} repair edit(s)`,
       doneMessage: 'Validation repair edits applied',
       failedMessage: 'Validation repair edits failed to apply',
       tone: 'info',
-    }, async () => workspaceService.applyGeneratedChanges(input.workspace.workspacePath, repairDraft.fileChanges));
+    }, async () => workspaceService.applyGeneratedChanges(input.workspace.workspacePath, repairDraft.data.fileChanges));
 
     if (repairedFiles.length === 0) {
       logger.warn('Validation repair pass produced no effective file changes.');

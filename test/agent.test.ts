@@ -130,25 +130,35 @@ describe('AgentOrchestrator draft PR parsing', () => {
 
     try {
       llmService.generateImplementationDraft = async () => ({
-        summary: 'Initial patch',
-        fileChanges: [
-          {
-            path: 'src/app.ts',
-            reason: 'Apply the initial implementation',
-            content: 'export const version = 1;\n',
-          },
-        ],
+        version: '1',
+        kind: 'implementation_draft',
+        status: 'success',
+        data: {
+          summary: 'Initial patch',
+          fileChanges: [
+            {
+              path: 'src/app.ts',
+              reason: 'Apply the initial implementation',
+              content: 'export const version = 1;\n',
+            },
+          ],
+        },
       });
 
       llmService.generateImplementationRepairDraft = async () => ({
-        summary: 'Repair patch',
-        fileChanges: [
-          {
-            path: 'src/app.ts',
-            reason: 'Fix the failing validation path',
-            content: 'export const version = 2;\n',
-          },
-        ],
+        version: '1',
+        kind: 'implementation_draft',
+        status: 'success',
+        data: {
+          summary: 'Repair patch',
+          fileChanges: [
+            {
+              path: 'src/app.ts',
+              reason: 'Fix the failing validation path',
+              content: 'export const version = 2;\n',
+            },
+          ],
+        },
       });
 
       workspaceService.runValidationCommands = () => {

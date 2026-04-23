@@ -1,25 +1,38 @@
 import { describe, expect, test } from 'bun:test';
 import { LLMService } from '../src/services/llm.js';
+import type { StructuredOutputStatus } from '../src/contracts/index.js';
 import type { ImplementationDraft, MatchedIssue } from '../src/types/index.js';
 import { createIssue } from './helpers/factories.js';
 
 interface LLMServiceInternals {
-  parseImplementationDraft(content: string): ImplementationDraft;
+  parseImplementationDraft(content: string): {
+    status: StructuredOutputStatus;
+    data: ImplementationDraft;
+  };
   parsePatchDraft(content: string): {
-    goal: string;
-    targetFiles: Array<{ path: string; reason: string }>;
-    proposedChanges: Array<{ title: string; details: string; files: string[] }>;
-    risks: string[];
-    validationNotes: string[];
+    status: StructuredOutputStatus;
+    data: {
+      goal: string;
+      targetFiles: Array<{ path: string; reason: string }>;
+      proposedChanges: Array<{ title: string; details: string; files: string[] }>;
+      risks: string[];
+      validationNotes: string[];
+    };
   };
   parsePullRequestDraft(content: string): {
-    title: string;
-    summary: string;
-    changes: string[];
-    validation: string[];
-    risks: string[];
+    status: StructuredOutputStatus;
+    data: {
+      title: string;
+      summary: string;
+      changes: string[];
+      validation: string[];
+      risks: string[];
+    };
   };
-  parseLLMResponse(content: string, originalIssues: ReturnType<typeof createIssue>[]): MatchedIssue[];
+  parseLLMResponse(content: string, originalIssues: ReturnType<typeof createIssue>[]): {
+    status: StructuredOutputStatus;
+    data: MatchedIssue[];
+  };
 }
 
 describe('LLMService implementation draft parsing', () => {
@@ -43,9 +56,10 @@ describe('LLMService implementation draft parsing', () => {
       }
     `);
 
-    expect(draft.summary).toBe('Update the button label');
-    expect(draft.fileChanges).toHaveLength(1);
-    expect(draft.fileChanges[0]?.path).toBe('src/button.tsx');
+    expect(draft.status).toBe('success');
+    expect(draft.data.summary).toBe('Update the button label');
+    expect(draft.data.fileChanges).toHaveLength(1);
+    expect(draft.data.fileChanges[0]?.path).toBe('src/button.tsx');
   });
 
   test('rejects fenced JSON responses that fail schema validation', () => {
@@ -98,10 +112,11 @@ describe('LLMService implementation draft parsing', () => {
       \`\`\`
     `);
 
-    expect(draft.summary).toBe('Add aria-label support');
-    expect(draft.fileChanges).toHaveLength(1);
-    expect(draft.fileChanges[0]?.path).toBe('src/components/IconButton.tsx');
-    expect(draft.fileChanges[0]?.content).toContain('aria-label="Open menu"');
+    expect(draft.status).toBe('success');
+    expect(draft.data.summary).toBe('Add aria-label support');
+    expect(draft.data.fileChanges).toHaveLength(1);
+    expect(draft.data.fileChanges[0]?.path).toBe('src/components/IconButton.tsx');
+    expect(draft.data.fileChanges[0]?.content).toContain('aria-label="Open menu"');
   });
 
   test('deduplicates repeated file changes by path and keeps the latest version', () => {
@@ -129,9 +144,10 @@ describe('LLMService implementation draft parsing', () => {
       }
     `);
 
-    expect(draft.fileChanges).toHaveLength(1);
-    expect(draft.fileChanges[0]?.reason).toBe('Final attempt');
-    expect(draft.fileChanges[0]?.content).toContain('<button />');
+    expect(draft.status).toBe('success');
+    expect(draft.data.fileChanges).toHaveLength(1);
+    expect(draft.data.fileChanges[0]?.reason).toBe('Final attempt');
+    expect(draft.data.fileChanges[0]?.content).toContain('<button />');
   });
 
   test('throws when implementation output is not parseable', () => {
@@ -184,12 +200,13 @@ describe('LLMService issue scoring response parsing', () => {
       }
     `, issues);
 
-    expect(parsed).toHaveLength(2);
-    expect(parsed[0]?.repoFullName).toBe('acme/demo');
-    expect(parsed[0]?.matchScore).toBe(100);
-    expect(parsed[0]?.analysis.techRequirements).toEqual(['react', 'typescript', 'accessibility']);
-    expect(parsed[1]?.repoFullName).toBe('acme/web');
-    expect(parsed[1]?.analysis.estimatedWorkload).toBe('30 minutes');
+    expect(parsed.status).toBe('success');
+    expect(parsed.data).toHaveLength(2);
+    expect(parsed.data[0]?.repoFullName).toBe('acme/demo');
+    expect(parsed.data[0]?.matchScore).toBe(100);
+    expect(parsed.data[0]?.analysis.techRequirements).toEqual(['react', 'typescript', 'accessibility']);
+    expect(parsed.data[1]?.repoFullName).toBe('acme/web');
+    expect(parsed.data[1]?.analysis.estimatedWorkload).toBe('30 minutes');
   });
 });
 
@@ -222,8 +239,9 @@ describe('LLMService pull request draft parsing', () => {
       }
     `);
 
-    expect(draft.goal).toBe('Add accessible labels to icon-only buttons');
-    expect(draft.targetFiles[0]?.path).toBe('src/components/IconButton.tsx');
+    expect(draft.status).toBe('success');
+    expect(draft.data.goal).toBe('Add accessible labels to icon-only buttons');
+    expect(draft.data.targetFiles[0]?.path).toBe('src/components/IconButton.tsx');
   });
 
   test('parses structured pull request drafts', () => {
@@ -243,7 +261,8 @@ describe('LLMService pull request draft parsing', () => {
       }
     `);
 
-    expect(draft.title).toBe('Add aria-label handling to icon-only buttons');
-    expect(draft.changes).toEqual(['Update the shared IconButton component']);
+    expect(draft.status).toBe('success');
+    expect(draft.data.title).toBe('Add aria-label handling to icon-only buttons');
+    expect(draft.data.changes).toEqual(['Update the shared IconButton component']);
   });
 });

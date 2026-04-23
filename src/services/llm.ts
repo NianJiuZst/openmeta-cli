@@ -4,6 +4,7 @@ import {
   ImplementationDraftEnvelopeSchema,
   IssueMatchListEnvelopeSchema,
   PatchDraftEnvelopeSchema,
+  type StructuredOutputResult,
   type PatchDraft,
   PullRequestDraftEnvelopeSchema,
   type PullRequestDraft,
@@ -67,9 +68,17 @@ export class LLMService {
     }
   }
 
-  async scoreIssues(userProfile: UserProfile, issues: GitHubIssue[]): Promise<MatchedIssue[]> {
+  async scoreIssues(
+    userProfile: UserProfile,
+    issues: GitHubIssue[],
+  ): Promise<StructuredOutputResult<'issue_match_list', MatchedIssue[]>> {
     if (issues.length === 0) {
-      return [];
+      return {
+        version: '1',
+        kind: 'issue_match_list',
+        status: 'success',
+        data: [],
+      };
     }
 
     const issueList = issues.map(i =>
@@ -110,7 +119,11 @@ Repo Stars: ${i.repoStars}`
     return await this.chat(prompt);
   }
 
-  async generatePatchDraft(issue: RankedIssue, workspace: RepoWorkspaceContext, memory: RepoMemory): Promise<PatchDraft> {
+  async generatePatchDraft(
+    issue: RankedIssue,
+    workspace: RepoWorkspaceContext,
+    memory: RepoMemory,
+  ): Promise<StructuredOutputResult<'patch_draft', PatchDraft>> {
     const repoContext = [
       `Workspace Path: ${workspace.workspacePath}`,
       `Default Branch: ${workspace.defaultBranch}`,
@@ -146,7 +159,7 @@ Repo Stars: ${i.repoStars}`
     issue: RankedIssue,
     workspace: RepoWorkspaceContext,
     patchDraft: PatchDraft,
-  ): Promise<ImplementationDraft> {
+  ): Promise<StructuredOutputResult<'implementation_draft', ImplementationDraft>> {
     const editableFiles = workspace.snippets.length > 0
       ? workspace.snippets.map((snippet) => `FILE: ${snippet.path}\n${snippet.content}`).join('\n\n')
       : 'No editable files were detected.';
@@ -169,7 +182,7 @@ Repo Stars: ${i.repoStars}`
     issue: RankedIssue,
     patchDraft: PatchDraft,
     workspace: RepoWorkspaceContext,
-  ): Promise<PullRequestDraft> {
+  ): Promise<StructuredOutputResult<'pull_request_draft', PullRequestDraft>> {
     const validationContext = [
       `Detected Commands: ${workspace.testCommands.map((item) => item.command).join(', ') || 'none'}`,
       `Runnable Commands: ${workspace.validationCommands.map((item) => item.command).join(', ') || 'none'}`,
@@ -193,7 +206,7 @@ Repo Stars: ${i.repoStars}`
     patchDraft: PatchDraft,
     validationResults: TestResult[],
     currentFiles: RepoFileSnippet[],
-  ): Promise<ImplementationDraft> {
+  ): Promise<StructuredOutputResult<'implementation_draft', ImplementationDraft>> {
     const validationFailures = validationResults.length > 0
       ? validationResults
         .filter((result) => !result.passed)
@@ -265,14 +278,21 @@ Repo Stars: ${i.repoStars}`
     }
   }
 
-  private parseLLMResponse(content: string, originalIssues: GitHubIssue[]): MatchedIssue[] {
+  private parseLLMResponse(
+    content: string,
+    originalIssues: GitHubIssue[],
+  ): StructuredOutputResult<'issue_match_list', MatchedIssue[]> {
     const issueByReference = new Map(
       originalIssues.map((issue) => [this.getIssueReference(issue), issue]),
     );
 
     const parsed = this.parseStructuredJson(content, IssueMatchListEnvelopeSchema);
 
-    return parsed.data.matches
+    return {
+      version: parsed.version,
+      kind: parsed.kind,
+      status: parsed.status,
+      data: parsed.data.matches
       .filter((match) => match.score >= 60)
       .flatMap((match) => {
         const issue = issueByReference.get(match.issueReference);
@@ -290,19 +310,24 @@ Repo Stars: ${i.repoStars}`
             estimatedWorkload: match.estimatedWorkload,
           },
         }];
-      });
+      }),
+    };
   }
 
-  private parseImplementationDraft(content: string): ImplementationDraft {
-    return this.parseStructuredJson(content, ImplementationDraftEnvelopeSchema).data;
+  private parseImplementationDraft(
+    content: string,
+  ): StructuredOutputResult<'implementation_draft', ImplementationDraft> {
+    return this.parseStructuredJson(content, ImplementationDraftEnvelopeSchema);
   }
 
-  private parsePatchDraft(content: string): PatchDraft {
-    return this.parseStructuredJson(content, PatchDraftEnvelopeSchema).data;
+  private parsePatchDraft(content: string): StructuredOutputResult<'patch_draft', PatchDraft> {
+    return this.parseStructuredJson(content, PatchDraftEnvelopeSchema);
   }
 
-  private parsePullRequestDraft(content: string): PullRequestDraft {
-    return this.parseStructuredJson(content, PullRequestDraftEnvelopeSchema).data;
+  private parsePullRequestDraft(
+    content: string,
+  ): StructuredOutputResult<'pull_request_draft', PullRequestDraft> {
+    return this.parseStructuredJson(content, PullRequestDraftEnvelopeSchema);
   }
 
   private parseStructuredJson<T>(content: string, schema: z.ZodType<T>): T {

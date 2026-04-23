@@ -103,6 +103,12 @@ export type GeneratedFileChange = z.infer<typeof GeneratedFileChangeSchema>;
 export type ImplementationDraft = z.infer<typeof ImplementationDraftSchema>;
 export type PullRequestDraft = z.infer<typeof PullRequestDraftSchema>;
 export type StructuredOutputStatus = z.infer<typeof StructuredOutputStatusSchema>;
+export interface StructuredOutputResult<TKind extends string, TData> {
+  version: '1';
+  kind: TKind;
+  status: StructuredOutputStatus;
+  data: TData;
+}
 export type IssueMatchListEnvelope = z.infer<typeof IssueMatchListEnvelopeSchema>;
 export type PatchDraftEnvelope = z.infer<typeof PatchDraftEnvelopeSchema>;
 export type ImplementationDraftEnvelope = z.infer<typeof ImplementationDraftEnvelopeSchema>;
