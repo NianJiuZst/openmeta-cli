@@ -1,8 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  ImplementationDraftEnvelopeSchema,
   ImplementationDraftSchema,
+  IssueMatchListEnvelopeSchema,
   IssueMatchListSchema,
+  PatchDraftEnvelopeSchema,
   PatchDraftSchema,
+  PullRequestDraftEnvelopeSchema,
   PullRequestDraftSchema,
 } from '../src/contracts/index.js';
 
@@ -86,5 +90,87 @@ describe('agent contracts', () => {
 
     expect(parsed.title).toBe('Add aria-label handling to icon buttons');
     expect(parsed.changes).toHaveLength(1);
+  });
+
+  test('wraps issue matches in a shared structured output envelope', () => {
+    const parsed = IssueMatchListEnvelopeSchema.parse({
+      version: '1',
+      kind: 'issue_match_list',
+      status: 'success',
+      data: {
+        matches: [
+          {
+            issueReference: 'acme/demo#42',
+            score: 88,
+            coreDemand: 'Add aria-label support',
+            techRequirements: ['react'],
+            estimatedWorkload: '1-2 hours',
+          },
+        ],
+      },
+    });
+
+    expect(parsed.version).toBe('1');
+    expect(parsed.kind).toBe('issue_match_list');
+    expect(parsed.data.matches[0]?.score).toBe(88);
+  });
+
+  test('wraps implementation drafts in a shared structured output envelope', () => {
+    const parsed = ImplementationDraftEnvelopeSchema.parse({
+      version: '1',
+      kind: 'implementation_draft',
+      status: 'needs_review',
+      data: {
+        summary: 'Insufficient context for a safe code patch.',
+        fileChanges: [],
+      },
+    });
+
+    expect(parsed.status).toBe('needs_review');
+    expect(parsed.data.fileChanges).toHaveLength(0);
+  });
+
+  test('wraps patch drafts in a shared structured output envelope', () => {
+    const parsed = PatchDraftEnvelopeSchema.parse({
+      version: '1',
+      kind: 'patch_draft',
+      status: 'success',
+      data: {
+        goal: 'Add accessible labels to icon-only buttons',
+        targetFiles: [
+          { path: 'src/components/IconButton.tsx', reason: 'Primary component logic' },
+        ],
+        proposedChanges: [
+          {
+            title: 'Update component props',
+            details: 'Accept an aria-label when the button is icon-only.',
+            files: ['src/components/IconButton.tsx'],
+          },
+        ],
+        risks: [],
+        validationNotes: [],
+      },
+    });
+
+    expect(parsed.kind).toBe('patch_draft');
+    expect(parsed.data.targetFiles[0]?.path).toBe('src/components/IconButton.tsx');
+  });
+
+  test('wraps pull request drafts in a shared structured output envelope', () => {
+    const parsed = PullRequestDraftEnvelopeSchema.parse({
+      version: '1',
+      kind: 'pull_request_draft',
+      status: 'success',
+      data: {
+        title: 'Add aria-label handling to icon buttons',
+        summary: 'Ensure icon-only buttons expose accessible names.',
+        changes: ['Add aria-label support to the shared button component'],
+        validation: ['bun test (pending)'],
+        risks: ['Dependent snapshots may need updates'],
+      },
+    });
+
+    expect(parsed.kind).toBe('pull_request_draft');
+    expect(parsed.data.title).toBe('Add aria-label handling to icon buttons');
   });
 });

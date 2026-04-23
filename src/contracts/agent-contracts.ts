@@ -2,6 +2,19 @@ import { z } from 'zod';
 
 const trimmedString = z.string().trim();
 const nonEmptyTrimmedString = trimmedString.min(1);
+const StructuredOutputStatusSchema = z.enum(['success', 'needs_review']);
+
+function createStructuredOutputEnvelopeSchema<
+  TKind extends string,
+  TDataSchema extends z.ZodTypeAny,
+>(kind: TKind, dataSchema: TDataSchema) {
+  return z.object({
+    version: z.literal('1'),
+    kind: z.literal(kind),
+    status: StructuredOutputStatusSchema,
+    data: dataSchema,
+  });
+}
 
 function dedupeStrings(values: string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
@@ -76,6 +89,11 @@ export const PullRequestDraftSchema = z.object({
   risks: z.array(nonEmptyTrimmedString).default([]),
 });
 
+export const IssueMatchListEnvelopeSchema = createStructuredOutputEnvelopeSchema('issue_match_list', IssueMatchListSchema);
+export const PatchDraftEnvelopeSchema = createStructuredOutputEnvelopeSchema('patch_draft', PatchDraftSchema);
+export const ImplementationDraftEnvelopeSchema = createStructuredOutputEnvelopeSchema('implementation_draft', ImplementationDraftSchema);
+export const PullRequestDraftEnvelopeSchema = createStructuredOutputEnvelopeSchema('pull_request_draft', PullRequestDraftSchema);
+
 export type IssueMatch = z.infer<typeof IssueMatchSchema>;
 export type IssueMatchList = z.infer<typeof IssueMatchListSchema>;
 export type PatchTargetFile = z.infer<typeof PatchTargetFileSchema>;
@@ -84,3 +102,8 @@ export type PatchDraft = z.infer<typeof PatchDraftSchema>;
 export type GeneratedFileChange = z.infer<typeof GeneratedFileChangeSchema>;
 export type ImplementationDraft = z.infer<typeof ImplementationDraftSchema>;
 export type PullRequestDraft = z.infer<typeof PullRequestDraftSchema>;
+export type StructuredOutputStatus = z.infer<typeof StructuredOutputStatusSchema>;
+export type IssueMatchListEnvelope = z.infer<typeof IssueMatchListEnvelopeSchema>;
+export type PatchDraftEnvelope = z.infer<typeof PatchDraftEnvelopeSchema>;
+export type ImplementationDraftEnvelope = z.infer<typeof ImplementationDraftEnvelopeSchema>;
+export type PullRequestDraftEnvelope = z.infer<typeof PullRequestDraftEnvelopeSchema>;
