@@ -466,6 +466,15 @@ function completionCopy(commandName: string): Pick<CardOptions, 'title' | 'subti
         ],
         tone: 'success',
       };
+    case 'OpenMeta Doctor':
+      return {
+        title: 'The local preflight finished cleanly',
+        subtitle: 'Runtime, configuration, storage paths, and automation policy are readable from one place.',
+        lines: [
+          'The agent has a stable surface to start from.',
+        ],
+        tone: 'success',
+      };
     default:
       return {
         title: 'Execution settled into a clean end state',

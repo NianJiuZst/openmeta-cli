@@ -212,6 +212,9 @@ bun run ./src/cli.ts pow
 # 5. 查看或调整配置
 bun run ./src/cli.ts config view
 bun run ./src/cli.ts config set <key> <value>
+
+# 6. 检查本地运行前置条件
+bun run ./src/cli.ts doctor
 ```
 
 如果你已经执行过构建，也可以直接使用：
@@ -227,7 +230,9 @@ bun run ./src/cli.ts config set <key> <value>
 | 命令 | 说明 |
 |------|------|
 | `openmeta init` | 交互式初始化 GitHub、LLM、用户画像、目标仓库和自动化配置 |
+| `openmeta doctor` | 检查本地配置、运行时、工作目录、目标仓库和调度器状态 |
 | `openmeta agent` | 运行自治贡献主流程 |
+| `openmeta agent --draft-only` | 只生成 dossier、patch draft 和 PR draft，不改仓库、不创建 PR |
 | `openmeta agent --headless` | 使用已保存设置进行无人值守执行 |
 | `openmeta agent --run-checks` | 执行检测到的基础校验命令 |
 | `openmeta daily` | `agent` 的兼容别名，支持相同运行参数 |
@@ -487,6 +492,9 @@ bun run ./src/cli.ts pow
 # 5. Review or update configuration
 bun run ./src/cli.ts config view
 bun run ./src/cli.ts config set <key> <value>
+
+# 6. Check local prerequisites before a full run
+bun run ./src/cli.ts doctor
 ```
 
 If you already built the binary:
@@ -502,7 +510,9 @@ If you already built the binary:
 | Command | Description |
 |---------|-------------|
 | `openmeta init` | Interactive setup for GitHub, LLM, profile, target repo, and automation |
+| `openmeta doctor` | Check local config, runtimes, paths, target repo, and scheduler state |
 | `openmeta agent` | Run the autonomous contribution workflow |
+| `openmeta agent --draft-only` | Generate dossier, patch draft, and PR draft artifacts without editing files or opening a PR |
 | `openmeta agent --headless` | Execute unattended using saved automation defaults |
 | `openmeta agent --run-checks` | Run detected baseline validation commands |
 | `openmeta daily` | Compatibility alias for `agent` with the same runtime options |

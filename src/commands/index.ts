@@ -6,3 +6,4 @@ export { registerInboxCommand } from './inbox.js';
 export { registerPowCommand } from './pow.js';
 export { registerConfigCommand } from './config.js';
 export { registerAutomationCommand } from './automation.js';
+export { registerDoctorCommand } from './doctor.js';
