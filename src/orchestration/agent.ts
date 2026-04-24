@@ -39,6 +39,7 @@ export interface AgentRunOptions {
   force?: boolean;
   schedulerRun?: boolean;
   runChecks?: boolean;
+  draftOnly?: boolean;
 }
 
 interface TargetRepoContext {
@@ -116,6 +117,7 @@ export class AgentOrchestrator {
     const headless = Boolean(options.headless);
     const schedulerRun = Boolean(options.schedulerRun);
     const runChecks = typeof options.runChecks === 'boolean' ? options.runChecks : !headless;
+    const draftOnly = Boolean(options.draftOnly);
     const completedStages = new Set<AgentStageId>();
 
     ui.hero({
@@ -126,6 +128,7 @@ export class AgentOrchestrator {
         : 'OpenMeta will read the field, enter the repository, shape a patch direction, and leave behind artifacts that feel deliberate instead of improvised.',
       lines: [
         runChecks ? 'Baseline checks will fire wherever the repository exposes a safe command path.' : 'This pass will stay light and skip baseline checks.',
+        draftOnly ? 'Draft-only mode will preserve artifacts without applying generated file edits or opening a PR.' : 'Generated patches can be applied after repository safety checks pass.',
         headless ? `Unattended selection honors the saved threshold at ${config.automation.minMatchScore}/100.` : 'You stay in control at each decision gate before anything is published.',
       ],
     });
@@ -207,7 +210,7 @@ export class AgentOrchestrator {
       });
     }
     const implementation = patchDraftResult.status === 'success'
-      ? await this.generateConcretePatch(selectedIssue, workspace, patchDraft, runChecks)
+      ? await this.generateConcretePatch(selectedIssue, workspace, patchDraft, runChecks, draftOnly)
       : {
         changedFiles: [],
         validationResults: workspace.testResults,
@@ -872,7 +875,41 @@ export class AgentOrchestrator {
     workspace: RepoWorkspaceContext,
     patchDraft: PatchDraft,
     runChecks: boolean,
+    draftOnly: boolean = false,
   ): Promise<ConcretePatchResult> {
+    if (draftOnly) {
+      ui.callout({
+        label: 'OpenMeta Agent',
+        title: 'Draft-only mode is active',
+        subtitle: 'OpenMeta will keep the patch strategy and PR narrative as artifacts without modifying repository files or opening a real PR.',
+        tone: 'info',
+      });
+      logger.info('Skipping generated file edits because draft-only mode is active.');
+      return {
+        changedFiles: [],
+        validationResults: workspace.testResults,
+        reviewRequired: false,
+      };
+    }
+
+    if (workspace.workspaceDirty) {
+      ui.callout({
+        label: 'OpenMeta Agent',
+        title: 'Workspace has existing local changes',
+        subtitle: 'OpenMeta will not apply generated file edits into a dirty workspace. Commit, stash, or review the existing changes before asking for an automatic patch.',
+        lines: [
+          `Workspace: ${workspace.workspacePath}`,
+        ],
+        tone: 'warning',
+      });
+      logger.warn(`Skipping generated file edits because the workspace is dirty: ${workspace.workspacePath}`);
+      return {
+        changedFiles: [],
+        validationResults: workspace.testResults,
+        reviewRequired: true,
+      };
+    }
+
     try {
       const implementation = await ui.task({
         title: 'Generating concrete patch',

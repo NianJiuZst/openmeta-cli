@@ -37,6 +37,7 @@ interface AgentInternals {
     workspace: ReturnType<typeof createWorkspace>,
     patchDraft: ReturnType<typeof createPatchDraft>,
     runChecks: boolean,
+    draftOnly?: boolean,
   ): Promise<{
     changedFiles: string[];
     validationResults: Array<{
@@ -236,6 +237,114 @@ describe('AgentOrchestrator draft PR parsing', () => {
         true,
       );
 
+      expect(result.changedFiles).toEqual([]);
+      expect(result.reviewRequired).toBe(true);
+      expect(readFileSync(join(workspacePath, 'src', 'app.ts'), 'utf-8')).toBe('export const version = 0;\n');
+    } finally {
+      llmService.generateImplementationDraft = originalGenerateImplementationDraft;
+    }
+  });
+
+  test('skips generated file edits in draft-only mode', async () => {
+    const workspacePath = mkdtempSync(join(tmpdir(), 'openmeta-agent-draft-only-'));
+    tempDirs.push(workspacePath);
+    mkdirSync(join(workspacePath, 'src'), { recursive: true });
+    writeFileSync(join(workspacePath, 'src', 'app.ts'), 'export const version = 0;\n', 'utf-8');
+
+    const originalGenerateImplementationDraft = llmService.generateImplementationDraft;
+    let implementationRequested = false;
+
+    try {
+      llmService.generateImplementationDraft = async () => {
+        implementationRequested = true;
+        return {
+          version: '1',
+          kind: 'implementation_draft',
+          status: 'success',
+          data: {
+            summary: 'Patch that should not be requested',
+            fileChanges: [
+              {
+                path: 'src/app.ts',
+                reason: 'Draft-only mode should skip this edit',
+                content: 'export const version = 1;\n',
+              },
+            ],
+          },
+        };
+      };
+
+      const orchestrator = new AgentOrchestrator() as unknown as AgentInternals;
+      const result = await orchestrator.generateConcretePatch(
+        createRankedIssue(),
+        createWorkspace({
+          workspacePath,
+          snippets: [{ path: 'src/app.ts', content: 'export const version = 0;\n' }],
+          testCommands: [],
+          validationCommands: [],
+          validationWarnings: [],
+          testResults: [],
+        }),
+        createPatchDraft(),
+        true,
+        true,
+      );
+
+      expect(implementationRequested).toBe(false);
+      expect(result.changedFiles).toEqual([]);
+      expect(result.reviewRequired).toBe(false);
+      expect(readFileSync(join(workspacePath, 'src', 'app.ts'), 'utf-8')).toBe('export const version = 0;\n');
+    } finally {
+      llmService.generateImplementationDraft = originalGenerateImplementationDraft;
+    }
+  });
+
+  test('skips generated file edits when the workspace is already dirty', async () => {
+    const workspacePath = mkdtempSync(join(tmpdir(), 'openmeta-agent-dirty-'));
+    tempDirs.push(workspacePath);
+    mkdirSync(join(workspacePath, 'src'), { recursive: true });
+    writeFileSync(join(workspacePath, 'src', 'app.ts'), 'export const version = 0;\n', 'utf-8');
+
+    const originalGenerateImplementationDraft = llmService.generateImplementationDraft;
+    let implementationRequested = false;
+
+    try {
+      llmService.generateImplementationDraft = async () => {
+        implementationRequested = true;
+        return {
+          version: '1',
+          kind: 'implementation_draft',
+          status: 'success',
+          data: {
+            summary: 'Patch that should not be requested',
+            fileChanges: [
+              {
+                path: 'src/app.ts',
+                reason: 'Dirty workspaces should be protected',
+                content: 'export const version = 1;\n',
+              },
+            ],
+          },
+        };
+      };
+
+      const orchestrator = new AgentOrchestrator() as unknown as AgentInternals;
+      const result = await orchestrator.generateConcretePatch(
+        createRankedIssue(),
+        createWorkspace({
+          workspacePath,
+          workspaceDirty: true,
+          snippets: [{ path: 'src/app.ts', content: 'export const version = 0;\n' }],
+          testCommands: [],
+          validationCommands: [],
+          validationWarnings: [],
+          testResults: [],
+        }),
+        createPatchDraft(),
+        true,
+      );
+
+      expect(implementationRequested).toBe(false);
       expect(result.changedFiles).toEqual([]);
       expect(result.reviewRequired).toBe(true);
       expect(readFileSync(join(workspacePath, 'src', 'app.ts'), 'utf-8')).toBe('export const version = 0;\n');
