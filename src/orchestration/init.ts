@@ -1,40 +1,16 @@
 import { existsSync } from 'fs';
 import type { AppConfig } from '../types/index.js';
 import type { UserProficiency } from '../types/config.types.js';
-import { githubService, llmService, schedulerService, type SchedulerSyncResult } from '../services/index.js';
+import {
+  githubService,
+  llmService,
+  schedulerService,
+  LLM_PROVIDER_PRESETS,
+  findLLMProviderPreset,
+  type SchedulerSyncResult,
+} from '../services/index.js';
 import { configService, prompt, selectPrompt, ui } from '../infra/index.js';
 import type { ContentType } from '../types/content.types.js';
-
-interface LLMProviderOption {
-  name: string;
-  value: string;
-  baseUrl: string;
-  models: Array<{ name: string; value: string }>;
-}
-
-const LLM_PROVIDERS: LLMProviderOption[] = [
-  {
-    name: 'OpenAI',
-    value: 'openai',
-    baseUrl: 'https://api.openai.com/v1',
-    models: [
-      { name: 'GPT-4o-mini', value: 'gpt-4o-mini' },
-      { name: 'GPT-4o', value: 'gpt-4o' },
-      { name: 'GPT-4-turbo', value: 'gpt-4-turbo' },
-    ],
-  },
-  {
-    name: 'MiniMax',
-    value: 'minimax',
-    baseUrl: 'https://api.minimaxi.com/v1',
-    models: [
-      { name: 'MiniMax-M2.7', value: 'MiniMax-M2.7' },
-      { name: 'MiniMax-M2.5', value: 'MiniMax-M2.5' },
-      { name: 'MiniMax-M2.1', value: 'MiniMax-M2.1' },
-      { name: 'MiniMax-M2', value: 'MiniMax-M2' },
-    ],
-  },
-];
 
 const TECH_STACK_CHOICES = [
   'TypeScript',
@@ -161,42 +137,53 @@ export class InitOrchestrator {
     this.renderStep('llm', completedSteps, 'Your model is used to score issues and draft research notes or diaries.');
 
     let providerValue = '';
-    let selectedProvider: LLMProviderOption | undefined;
+    let selectedProvider = findLLMProviderPreset(config.llm.provider);
     let modelValue = '';
+    let apiBaseUrl = '';
+    let apiHeaders: Record<string, string> = {};
     let apiKey = '';
     let llmValid = false;
 
     while (!llmValid) {
       providerValue = await selectPrompt<string>({
         message: 'Select LLM provider:',
-        default: config.llm.provider,
-        choices: LLM_PROVIDERS.map(provider => ({
+        default: this.getProviderDefault(config.llm.provider),
+        choices: LLM_PROVIDER_PRESETS.map(provider => ({
           name: provider.name,
           value: provider.value,
-          description: provider.baseUrl,
+          description: provider.baseUrl || 'Bring your own compatible endpoint',
         })),
       });
 
-      selectedProvider = LLM_PROVIDERS.find(p => p.value === providerValue);
+      selectedProvider = findLLMProviderPreset(providerValue as AppConfig['llm']['provider']);
       if (!selectedProvider) {
         throw new Error(`Provider not found: ${providerValue}`);
       }
 
-      modelValue = await selectPrompt<string>({
-        message: 'Select model:',
-        default: config.llm.modelName,
-        choices: selectedProvider.models.map(model => ({
-          name: model.name,
-          value: model.value,
-        })),
-      });
+      apiHeaders = selectedProvider.apiHeaders || {};
+      apiBaseUrl = selectedProvider.allowCustomBaseUrl
+        ? await this.promptApiBaseUrl(config.llm.apiBaseUrl)
+        : selectedProvider.baseUrl;
+
+      modelValue = selectedProvider.allowCustomModel
+        ? await this.promptModelName(config.llm.modelName)
+        : await selectPrompt<string>({
+          message: 'Select model:',
+          default: config.llm.modelName,
+          choices: selectedProvider.models.map((model) => ({
+            name: model.name,
+            value: model.value,
+          })),
+        });
 
       apiKey = await this.promptAPIKey();
 
-      llmService.initialize(apiKey, selectedProvider.baseUrl, modelValue);
+      llmService.initialize(apiKey, apiBaseUrl, modelValue, apiHeaders);
       llmValid = await this.validateLlmConnection();
 
       if (!llmValid) {
+        // 保留底层失败原因，方便用户区分是鉴权、配额还是网关问题。
+        const validationDetail = llmService.getLastValidationError();
         this.renderStep('llm', completedSteps, 'Provider validation needs to be retried.', true);
         ui.callout({
           label: 'OpenMeta Init',
@@ -205,6 +192,7 @@ export class InitOrchestrator {
           lines: [
             'Check provider endpoint, model name, and API key.',
             'If you use a proxy or compatible endpoint, confirm the base URL is correct.',
+            ...(validationDetail ? [`Provider detail: ${validationDetail}`] : []),
           ],
           tone: 'warning',
         });
@@ -233,7 +221,8 @@ export class InitOrchestrator {
     ui.keyValues('LLM provider connected', [
       { label: 'Provider', value: selectedProvider!.name, tone: 'success' },
       { label: 'Model', value: modelValue, tone: 'success' },
-      { label: 'Endpoint', value: selectedProvider!.baseUrl, tone: 'info' },
+      { label: 'Endpoint', value: apiBaseUrl, tone: 'info' },
+      { label: 'Extra headers', value: Object.keys(apiHeaders).length > 0 ? JSON.stringify(apiHeaders) : '(none)', tone: 'info' },
       { label: 'API key', value: ui.maskSecret(apiKey), tone: 'success' },
     ]);
 
@@ -391,10 +380,11 @@ export class InitOrchestrator {
         targetRepoPath: targetRepoPath || undefined,
       },
       llm: {
-        provider: providerValue as 'openai' | 'minimax',
-        apiBaseUrl: selectedProvider!.baseUrl,
+        provider: providerValue as AppConfig['llm']['provider'],
+        apiBaseUrl,
         apiKey,
         modelName: modelValue,
+        apiHeaders,
       },
       automation: {
         ...config.automation,
@@ -476,6 +466,36 @@ export class InitOrchestrator {
     return apiKey.trim();
   }
 
+  private async promptApiBaseUrl(defaultValue: string): Promise<string> {
+    const { apiBaseUrl } = await prompt<{ apiBaseUrl: string }>([
+      {
+        type: 'input',
+        name: 'apiBaseUrl',
+        message: 'Enter your OpenAI-compatible API base URL:',
+        default: defaultValue || 'https://api.openai.com/v1',
+        filter: (input: string) => input.trim(),
+        validate: (input: string) => input.trim().length > 0 || 'API base URL is required.',
+      },
+    ]);
+
+    return apiBaseUrl.trim();
+  }
+
+  private async promptModelName(defaultValue: string): Promise<string> {
+    const { modelName } = await prompt<{ modelName: string }>([
+      {
+        type: 'input',
+        name: 'modelName',
+        message: 'Enter your model name:',
+        default: defaultValue || 'gpt-4o-mini',
+        filter: (input: string) => input.trim(),
+        validate: (input: string) => input.trim().length > 0 || 'Model name is required.',
+      },
+    ]);
+
+    return modelName.trim();
+  }
+
   private async promptUsername(): Promise<string> {
     const { username } = await prompt<{ username: string }>([
       {
@@ -487,6 +507,12 @@ export class InitOrchestrator {
       },
     ]);
     return username.trim();
+  }
+
+  private getProviderDefault(provider: AppConfig['llm']['provider']): string {
+    return LLM_PROVIDER_PRESETS.some((option) => option.value === provider)
+      ? provider
+      : 'custom';
   }
 
   private formatAutomationSummary(config: AppConfig, result: SchedulerSyncResult): string {

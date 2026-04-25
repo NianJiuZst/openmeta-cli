@@ -22,6 +22,13 @@ import type {
 } from '../types/index.js';
 import { logger } from '../infra/logger.js';
 import {
+  LLM_VALIDATION_FALLBACK_HINTS,
+  LLM_VALIDATION_PROMPT,
+  LLM_VALIDATION_REQUEST,
+  LLM_VALIDATION_STATUS_HINTS,
+  LLM_VALIDATION_TIMEOUT_MS,
+} from './llm.constants.js';
+import {
   CODE_CHANGE_PROMPT,
   CODE_CHANGE_REPAIR_PROMPT,
   fillPrompt,
@@ -37,11 +44,18 @@ import {
 export class LLMService {
   private client: OpenAI | null = null;
   private modelName: string = 'gpt-4o-mini';
+  private lastValidationError: string | null = null;
 
-  initialize(apiKey: string, baseUrl: string, modelName?: string): void {
+  initialize(
+    apiKey: string,
+    baseUrl: string,
+    modelName?: string,
+    apiHeaders?: Record<string, string>,
+  ): void {
     this.client = new OpenAI({
       apiKey,
       baseURL: baseUrl,
+      defaultHeaders: apiHeaders,
     });
     if (modelName) {
       this.modelName = modelName;
@@ -54,18 +68,34 @@ export class LLMService {
     }
 
     try {
-      await this.client.chat.completions.create({
-        model: this.modelName,
-        messages: [{ role: 'user', content: 'hi' }],
-        max_tokens: 5,
-      });
+      const controller = new AbortController();
+      // Validation only needs a quick reachability check.
+      const timeout = setTimeout(() => controller.abort(), LLM_VALIDATION_TIMEOUT_MS);
+
+      try {
+        await this.client.chat.completions.create({
+          model: this.modelName,
+          messages: [{ role: 'user', content: LLM_VALIDATION_PROMPT }],
+          ...LLM_VALIDATION_REQUEST,
+        }, {
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
+      this.lastValidationError = null;
       logger.success('LLM API connection validated');
       return true;
     } catch (error) {
+      this.lastValidationError = this.describeValidationError(error);
       logger.warn('LLM API connection check failed.');
       logger.debug('LLM API connection check failed', error);
       return false;
     }
+  }
+
+  getLastValidationError(): string | null {
+    return this.lastValidationError;
   }
 
   async scoreIssues(
@@ -288,24 +318,24 @@ Repo Stars: ${i.repoStars}`
       kind: parsed.kind,
       status: parsed.status,
       data: parsed.data.matches
-      .filter((match) => match.score >= 60)
-      .flatMap((match) => {
-        const issue = issueByReference.get(match.issueReference);
-        if (!issue) {
-          return [];
-        }
+        .filter((match) => match.score >= 60)
+        .flatMap((match) => {
+          const issue = issueByReference.get(match.issueReference);
+          if (!issue) {
+            return [];
+          }
 
-        return [{
-          ...issue,
-          matchScore: match.score,
-          analysis: {
-            coreDemand: match.coreDemand,
-            techRequirements: match.techRequirements,
-            solutionSuggestion: '',
-            estimatedWorkload: match.estimatedWorkload,
-          },
-        }];
-      }),
+          return [{
+            ...issue,
+            matchScore: match.score,
+            analysis: {
+              coreDemand: match.coreDemand,
+              techRequirements: match.techRequirements,
+              solutionSuggestion: '',
+              estimatedWorkload: match.estimatedWorkload,
+            },
+          }];
+        }),
     };
   }
 
@@ -413,6 +443,69 @@ Repo Stars: ${i.repoStars}`
     ].join('\n');
   }
 
+  private describeValidationError(error: unknown): string {
+    if (this.isAbortError(error)) {
+      return LLM_VALIDATION_FALLBACK_HINTS.timeout;
+    }
+
+    const status = this.extractStatusCode(error);
+    if (status !== null) {
+      const detail = LLM_VALIDATION_STATUS_HINTS[status] ?? `The provider returned HTTP ${status} during validation.`;
+      return `(${status}) ${detail}`;
+    }
+
+    const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+
+    if (message.includes('timeout') || message.includes('timed out')) {
+      return LLM_VALIDATION_FALLBACK_HINTS.timeout;
+    }
+
+    if (message.includes('abort')) {
+      return LLM_VALIDATION_FALLBACK_HINTS.aborted;
+    }
+
+    if (
+      message.includes('network') ||
+      message.includes('enotfound') ||
+      message.includes('econnrefused') ||
+      message.includes('econnreset') ||
+      message.includes('fetch failed')
+    ) {
+      return LLM_VALIDATION_FALLBACK_HINTS.network;
+    }
+
+    return LLM_VALIDATION_FALLBACK_HINTS.unknown;
+  }
+
+  private extractStatusCode(error: unknown): number | null {
+    if (typeof error !== 'object' || error === null) {
+      return null;
+    }
+
+    if ('status' in error && typeof error.status === 'number') {
+      return error.status;
+    }
+
+    if ('code' in error && typeof error.code === 'number') {
+      return error.code;
+    }
+
+    if (
+      'response' in error &&
+      typeof error.response === 'object' &&
+      error.response !== null &&
+      'status' in error.response &&
+      typeof error.response.status === 'number'
+    ) {
+      return error.response.status;
+    }
+
+    return null;
+  }
+
+  private isAbortError(error: unknown): boolean {
+    return error instanceof Error && (error.name === 'AbortError' || error.message.toLowerCase().includes('aborted'));
+  }
 }
 
 export const llmService = new LLMService();

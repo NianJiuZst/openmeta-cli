@@ -61,6 +61,7 @@ export class ConfigOrchestrator {
       { label: 'Provider', value: config.llm.provider || '(not set)', tone: config.llm.provider ? 'info' : 'warning' },
       { label: 'Base URL', value: config.llm.apiBaseUrl || '(not set)', tone: config.llm.apiBaseUrl ? 'info' : 'warning' },
       { label: 'Model', value: config.llm.modelName || '(not set)', tone: config.llm.modelName ? 'info' : 'warning' },
+      { label: 'Extra headers', value: Object.keys(config.llm.apiHeaders || {}).length > 0 ? JSON.stringify(config.llm.apiHeaders) : '(none)', tone: 'info' },
       { label: 'API key', value: ui.maskSecret(config.llm.apiKey), tone: config.llm.apiKey ? 'info' : 'warning' },
     ]);
 
@@ -94,7 +95,7 @@ export class ConfigOrchestrator {
   async set(key: string, value: string): Promise<void> {
     const config = await configService.get();
     const validPaths = ['userProfile.techStack', 'userProfile.proficiency', 'userProfile.focusAreas',
-                       'github.username', 'github.targetRepoPath', 'llm.apiBaseUrl', 'llm.modelName',
+                       'github.username', 'github.targetRepoPath', 'llm.provider', 'llm.apiBaseUrl', 'llm.modelName',
                        'automation.enabled', 'automation.scheduleTime', 'automation.contentType',
                        'automation.minMatchScore', 'automation.skipIfAlreadyGeneratedToday',
                        'commitTemplate'];
@@ -128,6 +129,11 @@ export class ConfigOrchestrator {
       updated = await configService.update({ github: { ...config.github, username: value } });
     } else if (key === 'github.targetRepoPath') {
       updated = await configService.update({ github: { ...config.github, targetRepoPath: value } });
+    } else if (key === 'llm.provider') {
+      if (!['openai', 'minimax', 'moonshot', 'zhipu', 'custom'].includes(value)) {
+        throw new Error('llm.provider must be "openai", "minimax", "moonshot", "zhipu", or "custom".');
+      }
+      updated = await configService.update({ llm: { ...config.llm, provider: value as AppConfig['llm']['provider'] } });
     } else if (key === 'llm.apiBaseUrl') {
       updated = await configService.update({ llm: { ...config.llm, apiBaseUrl: value } });
     } else if (key === 'llm.modelName') {
@@ -272,6 +278,8 @@ export class ConfigOrchestrator {
         return config.github.username || '(not set)';
       case 'github.targetRepoPath':
         return config.github.targetRepoPath || 'Auto-managed private repository';
+      case 'llm.provider':
+        return config.llm.provider;
       case 'llm.apiBaseUrl':
         return config.llm.apiBaseUrl;
       case 'llm.modelName':

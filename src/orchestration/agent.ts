@@ -726,7 +726,7 @@ export class AgentOrchestrator {
     }
 
     this.octokit = new Octokit({ auth: config.github.pat });
-    llmService.initialize(config.llm.apiKey, config.llm.apiBaseUrl, config.llm.modelName);
+    llmService.initialize(config.llm.apiKey, config.llm.apiBaseUrl, config.llm.modelName, config.llm.apiHeaders);
     const llmValid = await ui.task({
       title: 'Validating LLM provider',
       doneMessage: 'LLM provider verified',

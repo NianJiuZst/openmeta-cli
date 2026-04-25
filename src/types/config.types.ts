@@ -15,13 +15,14 @@ export interface GitHubConfig {
   targetRepoPath?: string;
 }
 
-export type LLMProvider = 'openai' | 'minimax';
+export type LLMProvider = 'openai' | 'minimax' | 'moonshot' | 'zhipu' | 'custom';
 
 export interface LLMConfig {
   provider: LLMProvider;
   apiBaseUrl: string;
   apiKey: string;
   modelName: string;
+  apiHeaders?: Record<string, string>;
 }
 
 export interface AutomationConfig {
