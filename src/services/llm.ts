@@ -63,7 +63,7 @@ export class LLMService {
 
     try {
       const controller = new AbortController();
-      // 校验阶段只需要确认模型可达，不希望被长输出或 provider 卡住。
+      // Validation only needs a quick reachability check.
       const timeout = setTimeout(() => controller.abort(), LLM_VALIDATION_TIMEOUT_MS);
 
       try {
@@ -312,24 +312,24 @@ Repo Stars: ${i.repoStars}`
       kind: parsed.kind,
       status: parsed.status,
       data: parsed.data.matches
-      .filter((match) => match.score >= 60)
-      .flatMap((match) => {
-        const issue = issueByReference.get(match.issueReference);
-        if (!issue) {
-          return [];
-        }
+        .filter((match) => match.score >= 60)
+        .flatMap((match) => {
+          const issue = issueByReference.get(match.issueReference);
+          if (!issue) {
+            return [];
+          }
 
-        return [{
-          ...issue,
-          matchScore: match.score,
-          analysis: {
-            coreDemand: match.coreDemand,
-            techRequirements: match.techRequirements,
-            solutionSuggestion: '',
-            estimatedWorkload: match.estimatedWorkload,
-          },
-        }];
-      }),
+          return [{
+            ...issue,
+            matchScore: match.score,
+            analysis: {
+              coreDemand: match.coreDemand,
+              techRequirements: match.techRequirements,
+              solutionSuggestion: '',
+              estimatedWorkload: match.estimatedWorkload,
+            },
+          }];
+        }),
     };
   }
 
@@ -444,8 +444,8 @@ Repo Stars: ${i.repoStars}`
 
     const status = this.extractStatusCode(error);
     if (status !== null) {
-      // 优先把常见 HTTP 状态翻译成可操作的提示，init 界面会直接展示给用户。
-      return LLM_VALIDATION_STATUS_HINTS[status] ?? `The provider returned HTTP ${status} during validation.`;
+      const detail = LLM_VALIDATION_STATUS_HINTS[status] ?? `The provider returned HTTP ${status} during validation.`;
+      return `(${status}) ${detail}`;
     }
 
     const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
@@ -500,7 +500,6 @@ Repo Stars: ${i.repoStars}`
   private isAbortError(error: unknown): boolean {
     return error instanceof Error && (error.name === 'AbortError' || error.message.toLowerCase().includes('aborted'));
   }
-
 }
 
 export const llmService = new LLMService();
