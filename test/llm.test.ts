@@ -5,6 +5,16 @@ import type { ImplementationDraft, MatchedIssue } from '../src/types/index.js';
 import { createIssue, createMemory } from './helpers/factories.js';
 
 interface LLMServiceInternals {
+  validateConnection(): Promise<boolean>;
+  getLastValidationError(): string | null;
+  client: {
+    chat: {
+      completions: {
+        create: () => Promise<unknown>;
+      };
+    };
+  } | null;
+  provider: 'openai' | 'minimax' | 'moonshot' | 'zhipu' | 'custom';
   parseImplementationDraft(content: string): {
     status: StructuredOutputStatus;
     data: ImplementationDraft;
@@ -156,6 +166,74 @@ describe('LLMService implementation draft parsing', () => {
     expect(() => service.parseImplementationDraft('unstructured output')).toThrow(
       'LLM did not return a parseable JSON object.',
     );
+  });
+});
+
+describe('LLMService validation behavior', () => {
+  test('requires an OpenAI-compatible payload for custom providers', async () => {
+    const service = new LLMService() as unknown as LLMServiceInternals;
+    service.provider = 'custom';
+    service.client = {
+      chat: {
+        completions: {
+          create: async () => '<!doctype html><html></html>',
+        },
+      },
+    };
+
+    const valid = await service.validateConnection();
+
+    expect(valid).toBe(false);
+    expect(service.getLastValidationError()).toContain('did not match the expected OpenAI-compatible format');
+  });
+
+  test('accepts exact OK replies for custom providers', async () => {
+    const service = new LLMService() as unknown as LLMServiceInternals;
+    service.provider = 'custom';
+    service.client = {
+      chat: {
+        completions: {
+          create: async () => ({
+            choices: [{ message: { content: 'OK' } }],
+          }),
+        },
+      },
+    };
+
+    const valid = await service.validateConnection();
+    expect(valid).toBe(true);
+  });
+
+  test('accepts non-empty assistant replies for custom providers', async () => {
+    const service = new LLMService() as unknown as LLMServiceInternals;
+    service.provider = 'custom';
+    service.client = {
+      chat: {
+        completions: {
+          create: async () => ({
+            choices: [{ message: { content: 'Validation passed.' } }],
+          }),
+        },
+      },
+    };
+
+    const valid = await service.validateConnection();
+    expect(valid).toBe(true);
+  });
+
+  test('keeps existing lenient validation for built-in providers', async () => {
+    const service = new LLMService() as unknown as LLMServiceInternals;
+    service.provider = 'openai';
+    service.client = {
+      chat: {
+        completions: {
+          create: async () => '<!doctype html><html></html>',
+        },
+      },
+    };
+
+    const valid = await service.validateConnection();
+    expect(valid).toBe(true);
   });
 });
 

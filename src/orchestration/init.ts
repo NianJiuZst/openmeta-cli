@@ -212,7 +212,7 @@ export class InitOrchestrator {
 
       apiKey = await this.promptAPIKey();
 
-      llmService.initialize(apiKey, apiBaseUrl, modelValue);
+      llmService.initialize(apiKey, apiBaseUrl, modelValue, undefined, selectedProvider.value as AppConfig['llm']['provider']);
       llmValid = await this.validateLlmConnection();
 
       if (!llmValid) {

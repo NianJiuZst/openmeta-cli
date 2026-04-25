@@ -12,6 +12,7 @@ import {
 import type {
   GitHubIssue,
   ImplementationDraft,
+  LLMProvider,
   MatchedIssue,
   RankedIssue,
   RepoFileSnippet,
@@ -44,15 +45,26 @@ import {
 export class LLMService {
   private client: OpenAI | null = null;
   private modelName: string = 'gpt-4o-mini';
+  private provider: LLMProvider = 'openai';
   private lastValidationError: string | null = null;
 
-  initialize(apiKey: string, baseUrl: string, modelName?: string): void {
+  initialize(
+    apiKey: string,
+    baseUrl: string,
+    modelName?: string,
+    apiHeaders?: Record<string, string>,
+    provider?: LLMProvider,
+  ): void {
     this.client = new OpenAI({
       apiKey,
       baseURL: baseUrl,
+      defaultHeaders: apiHeaders,
     });
     if (modelName) {
       this.modelName = modelName;
+    }
+    if (provider) {
+      this.provider = provider;
     }
   }
 
@@ -67,13 +79,18 @@ export class LLMService {
       const timeout = setTimeout(() => controller.abort(), LLM_VALIDATION_TIMEOUT_MS);
 
       try {
-        await this.client.chat.completions.create({
+        const response = await this.client.chat.completions.create({
           model: this.modelName,
           messages: [{ role: 'user', content: LLM_VALIDATION_PROMPT }],
           ...LLM_VALIDATION_REQUEST,
         }, {
           signal: controller.signal,
         });
+
+        // 自定义兼容端点最容易把站点页面或其他 200 响应误判为可用，所以这里额外校验返回结构。
+        if (this.provider === 'custom') {
+          this.assertCustomValidationResponse(response);
+        }
       } finally {
         clearTimeout(timeout);
       }
@@ -459,6 +476,13 @@ Repo Stars: ${i.repoStars}`
     }
 
     if (
+      message.includes('did not match the expected openai-compatible format') ||
+      message.includes('usable assistant reply')
+    ) {
+      return LLM_VALIDATION_FALLBACK_HINTS.invalidPayload;
+    }
+
+    if (
       message.includes('network') ||
       message.includes('enotfound') ||
       message.includes('econnrefused') ||
@@ -499,6 +523,29 @@ Repo Stars: ${i.repoStars}`
 
   private isAbortError(error: unknown): boolean {
     return error instanceof Error && (error.name === 'AbortError' || error.message.toLowerCase().includes('aborted'));
+  }
+
+  private assertCustomValidationResponse(response: unknown): void {
+    if (typeof response !== 'object' || response === null) {
+      throw new Error('Custom provider validation response did not match the expected OpenAI-compatible format.');
+    }
+
+    // 这里只要求标准 chat.completions 结构里存在可用文本，尽早拦住错误的自定义 base URL。
+    const content = 'choices' in response &&
+      Array.isArray(response.choices) &&
+      response.choices[0] &&
+      typeof response.choices[0] === 'object' &&
+      response.choices[0] !== null &&
+      'message' in response.choices[0] &&
+      typeof response.choices[0].message === 'object' &&
+      response.choices[0].message !== null &&
+      'content' in response.choices[0].message
+      ? response.choices[0].message.content
+      : undefined;
+
+    if (typeof content !== 'string' || content.trim().length === 0) {
+      throw new Error('Custom provider validation response did not include a usable assistant reply.');
+    }
   }
 }
 

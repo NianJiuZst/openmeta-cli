@@ -25,5 +25,6 @@ export const LLM_VALIDATION_FALLBACK_HINTS = {
   timeout: 'The validation request timed out before the provider returned a response.',
   aborted: 'The validation request was aborted before a response was received.',
   network: 'The provider could not be reached. Check network access and the configured base URL.',
+  invalidPayload: 'The provider returned a response, but it did not match the expected OpenAI-compatible format or did not include a usable assistant reply.',
   unknown: 'The provider validation failed for an unknown reason. Check the debug logs for details.',
 } as const;
