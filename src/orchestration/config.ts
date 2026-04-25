@@ -61,6 +61,7 @@ export class ConfigOrchestrator {
       { label: 'Provider', value: config.llm.provider || '(not set)', tone: config.llm.provider ? 'info' : 'warning' },
       { label: 'Base URL', value: config.llm.apiBaseUrl || '(not set)', tone: config.llm.apiBaseUrl ? 'info' : 'warning' },
       { label: 'Model', value: config.llm.modelName || '(not set)', tone: config.llm.modelName ? 'info' : 'warning' },
+      { label: 'Extra headers', value: Object.keys(config.llm.apiHeaders || {}).length > 0 ? JSON.stringify(config.llm.apiHeaders) : '(none)', tone: 'info' },
       { label: 'API key', value: ui.maskSecret(config.llm.apiKey), tone: config.llm.apiKey ? 'info' : 'warning' },
     ]);
 
@@ -129,10 +130,10 @@ export class ConfigOrchestrator {
     } else if (key === 'github.targetRepoPath') {
       updated = await configService.update({ github: { ...config.github, targetRepoPath: value } });
     } else if (key === 'llm.provider') {
-      if (value !== 'openai' && value !== 'minimax' && value !== 'custom') {
-        throw new Error('llm.provider must be "openai", "minimax", or "custom".');
+      if (!['openai', 'minimax', 'moonshot', 'zhipu', 'custom'].includes(value)) {
+        throw new Error('llm.provider must be "openai", "minimax", "moonshot", "zhipu", or "custom".');
       }
-      updated = await configService.update({ llm: { ...config.llm, provider: value as 'openai' | 'minimax' | 'custom' } });
+      updated = await configService.update({ llm: { ...config.llm, provider: value as AppConfig['llm']['provider'] } });
     } else if (key === 'llm.apiBaseUrl') {
       updated = await configService.update({ llm: { ...config.llm, apiBaseUrl: value } });
     } else if (key === 'llm.modelName') {

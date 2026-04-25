@@ -1,51 +1,16 @@
 import { existsSync } from 'fs';
 import type { AppConfig } from '../types/index.js';
 import type { UserProficiency } from '../types/config.types.js';
-import { githubService, llmService, schedulerService, type SchedulerSyncResult } from '../services/index.js';
+import {
+  githubService,
+  llmService,
+  schedulerService,
+  LLM_PROVIDER_PRESETS,
+  findLLMProviderPreset,
+  type SchedulerSyncResult,
+} from '../services/index.js';
 import { configService, prompt, selectPrompt, ui } from '../infra/index.js';
 import type { ContentType } from '../types/content.types.js';
-
-interface LLMProviderOption {
-  name: string;
-  value: string;
-  baseUrl: string;
-  models: Array<{ name: string; value: string }>;
-  allowCustomModel?: boolean;
-  allowCustomBaseUrl?: boolean;
-}
-
-const LLM_PROVIDERS: LLMProviderOption[] = [
-  {
-    name: 'OpenAI',
-    value: 'openai',
-    baseUrl: 'https://api.openai.com/v1',
-    models: [
-      { name: 'GPT-4o-mini', value: 'gpt-4o-mini' },
-      { name: 'GPT-4o', value: 'gpt-4o' },
-      { name: 'GPT-4-turbo', value: 'gpt-4-turbo' },
-    ],
-  },
-  {
-    name: 'MiniMax',
-    value: 'minimax',
-    baseUrl: 'https://api.minimaxi.com/v1',
-    models: [
-      { name: 'MiniMax-M2.7', value: 'MiniMax-M2.7' },
-      { name: 'MiniMax-M2.5', value: 'MiniMax-M2.5' },
-      { name: 'MiniMax-M2.1', value: 'MiniMax-M2.1' },
-      { name: 'MiniMax-M2', value: 'MiniMax-M2' },
-    ],
-  },
-  {
-    name: 'Custom (OpenAI-compatible)',
-    value: 'custom',
-    baseUrl: '',
-    models: [],
-    // 兼容 OpenAI 接口的第三方平台通常需要用户自行填写模型名和网关地址。
-    allowCustomModel: true,
-    allowCustomBaseUrl: true,
-  },
-];
 
 const TECH_STACK_CHOICES = [
   'TypeScript',
@@ -172,9 +137,10 @@ export class InitOrchestrator {
     this.renderStep('llm', completedSteps, 'Your model is used to score issues and draft research notes or diaries.');
 
     let providerValue = '';
-    let selectedProvider: LLMProviderOption | undefined;
+    let selectedProvider = findLLMProviderPreset(config.llm.provider);
     let modelValue = '';
     let apiBaseUrl = '';
+    let apiHeaders: Record<string, string> = {};
     let apiKey = '';
     let llmValid = false;
 
@@ -182,19 +148,19 @@ export class InitOrchestrator {
       providerValue = await selectPrompt<string>({
         message: 'Select LLM provider:',
         default: this.getProviderDefault(config.llm.provider),
-        choices: LLM_PROVIDERS.map(provider => ({
+        choices: LLM_PROVIDER_PRESETS.map(provider => ({
           name: provider.name,
           value: provider.value,
           description: provider.baseUrl || 'Bring your own compatible endpoint',
         })),
       });
 
-      selectedProvider = LLM_PROVIDERS.find(p => p.value === providerValue);
+      selectedProvider = findLLMProviderPreset(providerValue as AppConfig['llm']['provider']);
       if (!selectedProvider) {
         throw new Error(`Provider not found: ${providerValue}`);
       }
 
-      // 自定义 provider 不提供内置候选项，因此这里转为手动输入。
+      apiHeaders = selectedProvider.apiHeaders || {};
       apiBaseUrl = selectedProvider.allowCustomBaseUrl
         ? await this.promptApiBaseUrl(config.llm.apiBaseUrl)
         : selectedProvider.baseUrl;
@@ -204,7 +170,7 @@ export class InitOrchestrator {
         : await selectPrompt<string>({
           message: 'Select model:',
           default: config.llm.modelName,
-          choices: selectedProvider.models.map(model => ({
+          choices: selectedProvider.models.map((model) => ({
             name: model.name,
             value: model.value,
           })),
@@ -212,7 +178,7 @@ export class InitOrchestrator {
 
       apiKey = await this.promptAPIKey();
 
-      llmService.initialize(apiKey, apiBaseUrl, modelValue);
+      llmService.initialize(apiKey, apiBaseUrl, modelValue, apiHeaders);
       llmValid = await this.validateLlmConnection();
 
       if (!llmValid) {
@@ -256,6 +222,7 @@ export class InitOrchestrator {
       { label: 'Provider', value: selectedProvider!.name, tone: 'success' },
       { label: 'Model', value: modelValue, tone: 'success' },
       { label: 'Endpoint', value: apiBaseUrl, tone: 'info' },
+      { label: 'Extra headers', value: Object.keys(apiHeaders).length > 0 ? JSON.stringify(apiHeaders) : '(none)', tone: 'info' },
       { label: 'API key', value: ui.maskSecret(apiKey), tone: 'success' },
     ]);
 
@@ -413,10 +380,11 @@ export class InitOrchestrator {
         targetRepoPath: targetRepoPath || undefined,
       },
       llm: {
-        provider: providerValue as 'openai' | 'minimax' | 'custom',
+        provider: providerValue as AppConfig['llm']['provider'],
         apiBaseUrl,
         apiKey,
         modelName: modelValue,
+        apiHeaders,
       },
       automation: {
         ...config.automation,
@@ -542,8 +510,7 @@ export class InitOrchestrator {
   }
 
   private getProviderDefault(provider: AppConfig['llm']['provider']): string {
-    // 兼容旧配置；遇到未知 provider 时回退到 custom，避免 init 直接卡死。
-    return LLM_PROVIDERS.some((option) => option.value === provider)
+    return LLM_PROVIDER_PRESETS.some((option) => option.value === provider)
       ? provider
       : 'custom';
   }

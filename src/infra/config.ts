@@ -42,6 +42,7 @@ function createDefaultConfig(): AppConfig {
       apiBaseUrl: 'https://api.openai.com/v1',
       apiKey: '',
       modelName: 'gpt-4o-mini',
+      apiHeaders: {},
     },
     automation: {
       enabled: true,

@@ -46,10 +46,16 @@ export class LLMService {
   private modelName: string = 'gpt-4o-mini';
   private lastValidationError: string | null = null;
 
-  initialize(apiKey: string, baseUrl: string, modelName?: string): void {
+  initialize(
+    apiKey: string,
+    baseUrl: string,
+    modelName?: string,
+    apiHeaders?: Record<string, string>,
+  ): void {
     this.client = new OpenAI({
       apiKey,
       baseURL: baseUrl,
+      defaultHeaders: apiHeaders,
     });
     if (modelName) {
       this.modelName = modelName;
