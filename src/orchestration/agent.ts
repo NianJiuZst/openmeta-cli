@@ -1930,7 +1930,7 @@ export class AgentOrchestrator {
       const { data } = await this.octokit.rest.repos.createForAuthenticatedUser({
         name: repoName,
         private: true,
-        auto_init: true,
+        auto_init: false,
         description: 'OpenMeta contribution dossiers and proof of work',
       });
 
@@ -2263,14 +2263,6 @@ export class AgentOrchestrator {
       await git.checkoutLocalBranch(defaultBranch);
     } catch {
       await git.checkout(['-B', defaultBranch]);
-    }
-
-    // If the remote has no commits yet (newly created empty repo), push an initial commit
-    // so that subsequent branch pushes have a valid base ref on the remote.
-    const status = await git.status();
-    if (!status.tracking) {
-      await git.commit('chore: initialize repository', { '--allow-empty': null });
-      await git.raw(['push', '--set-upstream', 'origin', defaultBranch]);
     }
   }
 }

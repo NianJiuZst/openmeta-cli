@@ -80,261 +80,207 @@ export class InitOrchestrator {
     });
 
     const config = await configService.get();
-    let workingConfig: AppConfig = { ...config };
     const completedSteps = new Set<SetupStepId>();
 
-    type ConfigPatch = {
-      github?: Partial<AppConfig['github']>;
-      llm?: Partial<AppConfig['llm']>;
-      userProfile?: Partial<AppConfig['userProfile']>;
-      automation?: Partial<AppConfig['automation']>;
-    };
+    this.renderStep('github', completedSteps, 'OpenMeta needs a GitHub token so it can discover and rank contribution issues.');
 
-    const commit = async (patch: ConfigPatch): Promise<void> => {
-      workingConfig = {
-        ...workingConfig,
-        github: { ...workingConfig.github, ...patch.github },
-        llm: { ...workingConfig.llm, ...patch.llm },
-        userProfile: { ...workingConfig.userProfile, ...patch.userProfile },
-        automation: { ...workingConfig.automation, ...patch.automation },
-      };
-      await configService.save(workingConfig);
-    };
+    let pat = '';
+    let username = '';
+    let ghValid = false;
 
-    // stepOrSkip: if already saved, mark done, render green header + summary and skip interaction.
-    // Otherwise render the "in progress" header and run the interaction via `run`.
-    // Returns false if the user chose to abort mid-step (run returned false), so execute() can exit early.
-    const stepOrSkip = async (
-      id: SetupStepId,
-      isDone: boolean,
-      skipSubtitle: string,
-      skipSummary: () => void,
-      activeSubtitle: string,
-      run: () => Promise<boolean>,
-    ): Promise<boolean> => {
-      if (isDone) {
-        completedSteps.add(id);
-        this.renderStep(id, completedSteps, skipSubtitle);
-        skipSummary();
-        return true;
-      }
-      this.renderStep(id, completedSteps, activeSubtitle);
-      return run();
-    };
+    while (!ghValid) {
+      pat = await this.promptGitHubPAT();
+      username = await this.promptUsername();
 
-    // ── Step 1: GitHub ────────────────────────────────────────────────────────
+      githubService.initialize(pat, username);
+      ghValid = await this.validateGitHubCredentials();
 
-    let pat = config.github.pat;
-    let username = config.github.username;
-
-    await stepOrSkip(
-      'github',
-      !!(pat && username),
-      'GitHub credentials are already saved.',
-      () => {
-        githubService.initialize(pat, username);
-        ui.keyValues('GitHub connected', [
-          { label: 'Username', value: username, tone: 'success' },
-          { label: 'Token', value: ui.maskSecret(pat), tone: 'success' },
-        ]);
-      },
-      'OpenMeta needs a GitHub token so it can discover and rank contribution issues.',
-      async () => {
-        let ghValid = false;
-        while (!ghValid) {
-          pat = await this.promptGitHubPAT();
-          username = await this.promptUsername();
-
-          githubService.initialize(pat, username);
-          ghValid = await this.validateGitHubCredentials();
-
-          if (!ghValid) {
-            this.renderStep('github', completedSteps, 'GitHub credentials need to be retried.', true);
-            ui.callout({
-              label: 'OpenMeta Init',
-              title: 'GitHub validation failed',
-              subtitle: 'OpenMeta could not verify repository access with the token and username you entered.',
-              lines: ['Suggested token scopes: repo, user', 'Check that the username matches the token owner.'],
-              tone: 'warning',
-            });
-            const { retry } = await prompt<{ retry: boolean }>([
-              { type: 'confirm', name: 'retry', message: 'Try another GitHub token?', default: true },
-            ]);
-            if (!retry) {
-              ui.callout({ label: 'OpenMeta Init', title: 'Setup paused', subtitle: 'GitHub access was not configured. Run "openmeta init" again whenever you are ready.', tone: 'warning' });
-              return false;
-            }
-          }
-        }
-        completedSteps.add('github');
-        await commit({ github: { pat, username } });
-        ui.keyValues('GitHub connected', [
-          { label: 'Username', value: username, tone: 'success' },
-          { label: 'Token', value: ui.maskSecret(pat), tone: 'success' },
-        ]);
-        return true;
-      },
-    );
-
-    if (!completedSteps.has('github')) return;
-
-    // ── Step 2: LLM ───────────────────────────────────────────────────────────
-
-    let providerValue = config.llm.provider;
-    let selectedProvider = findLLMProviderPreset(config.llm.provider);
-    let modelValue = config.llm.modelName;
-    let apiBaseUrl = config.llm.apiBaseUrl;
-    let apiHeaders: Record<string, string> = config.llm.apiHeaders ?? {};
-    let apiKey = config.llm.apiKey;
-
-    await stepOrSkip(
-      'llm',
-      !!(apiKey && apiBaseUrl && modelValue),
-      'LLM provider is already configured.',
-      () => {
-        llmService.initialize(apiKey, apiBaseUrl, modelValue, apiHeaders, providerValue);
-        ui.keyValues('LLM provider connected', [
-          { label: 'Provider', value: selectedProvider?.name ?? providerValue, tone: 'success' },
-          { label: 'Model', value: modelValue, tone: 'success' },
-          { label: 'Endpoint', value: apiBaseUrl, tone: 'info' },
-          { label: 'Extra headers', value: Object.keys(apiHeaders).length > 0 ? JSON.stringify(apiHeaders) : '(none)', tone: 'info' },
-          { label: 'API key', value: ui.maskSecret(apiKey), tone: 'success' },
-        ]);
-      },
-      'Your model is used to score issues and draft research notes or diaries.',
-      async () => {
-        let llmValid = false;
-        while (!llmValid) {
-          providerValue = await selectPrompt<string>({
-            message: 'Select LLM provider:',
-            default: this.getProviderDefault(config.llm.provider),
-            choices: LLM_PROVIDER_PRESETS.map(provider => ({
-              name: provider.name,
-              value: provider.value,
-              description: provider.baseUrl || 'Bring your own compatible endpoint',
-            })),
-          }) as AppConfig['llm']['provider'];
-
-          selectedProvider = findLLMProviderPreset(providerValue as AppConfig['llm']['provider']);
-          if (!selectedProvider) throw new Error(`Provider not found: ${providerValue}`);
-
-          apiHeaders = selectedProvider.apiHeaders || {};
-          apiBaseUrl = selectedProvider.allowCustomBaseUrl
-            ? await this.promptApiBaseUrl(config.llm.apiBaseUrl)
-            : selectedProvider.baseUrl;
-
-          modelValue = selectedProvider.allowCustomModel
-            ? await this.promptModelName(config.llm.modelName)
-            : await selectPrompt<string>({
-              message: 'Select model:',
-              default: config.llm.modelName,
-              choices: selectedProvider.models.map((model) => ({ name: model.name, value: model.value })),
-            });
-
-          apiKey = await this.promptAPIKey();
-
-          llmService.initialize(apiKey, apiBaseUrl, modelValue, apiHeaders, selectedProvider.value as AppConfig['llm']['provider']);
-          llmValid = await this.validateLlmConnection();
-
-          if (!llmValid) {
-            const validationDetail = llmService.getLastValidationError();
-            this.renderStep('llm', completedSteps, 'Provider validation needs to be retried.', true);
-            ui.callout({
-              label: 'OpenMeta Init',
-              title: 'LLM validation failed',
-              subtitle: 'OpenMeta could not connect to the configured provider with the selected model and API key.',
-              lines: [
-                'Check provider endpoint, model name, and API key.',
-                'If you use a proxy or compatible endpoint, confirm the base URL is correct.',
-                ...(validationDetail ? [`Provider detail: ${validationDetail}`] : []),
-              ],
-              tone: 'warning',
-            });
-            const { retry } = await prompt<{ retry: boolean }>([
-              { type: 'confirm', name: 'retry', message: 'Try another provider or API key?', default: true },
-            ]);
-            if (!retry) {
-              ui.callout({ label: 'OpenMeta Init', title: 'Setup paused', subtitle: 'The LLM provider was not configured. Run "openmeta init" again when you want to continue.', tone: 'warning' });
-              return false;
-            }
-          }
-        }
-        completedSteps.add('llm');
-        await commit({ llm: { provider: providerValue as AppConfig['llm']['provider'], apiBaseUrl, apiKey, modelName: modelValue, apiHeaders } });
-        ui.keyValues('LLM provider connected', [
-          { label: 'Provider', value: selectedProvider!.name, tone: 'success' },
-          { label: 'Model', value: modelValue, tone: 'success' },
-          { label: 'Endpoint', value: apiBaseUrl, tone: 'info' },
-          { label: 'Extra headers', value: Object.keys(apiHeaders).length > 0 ? JSON.stringify(apiHeaders) : '(none)', tone: 'info' },
-          { label: 'API key', value: ui.maskSecret(apiKey), tone: 'success' },
-        ]);
-        return true;
-      },
-    );
-
-    if (!completedSteps.has('llm')) return;
-
-    // ── Step 3: Profile ───────────────────────────────────────────────────────
-
-    let techStack = config.userProfile.techStack;
-    let proficiency = config.userProfile.proficiency;
-    let focusAreas = config.userProfile.focusAreas;
-
-    await stepOrSkip(
-      'profile',
-      techStack.length > 0 && focusAreas.length > 0,
-      'Matching profile is already saved.',
-      () => {
-        ui.keyValues('Matching profile captured', [
-          { label: 'Tech stack', value: techStack.join(', '), tone: 'info' },
-          { label: 'Proficiency', value: proficiency, tone: 'info' },
-          { label: 'Focus areas', value: focusAreas.join(', '), tone: 'info' },
-        ]);
-      },
-      'Choose the stack and focus areas that should influence issue scoring.',
-      async () => {
-        ({ techStack } = await prompt<{ techStack: string[] }>([
-          {
-            type: 'checkbox',
-            name: 'techStack',
-            message: '  Select your tech stack (Space to select, Enter to confirm):',
-            choices: TECH_STACK_CHOICES.map(tech => ({ name: tech, value: tech, checked: config.userProfile.techStack.includes(tech) })),
-            validate: (input: string[]) => input.length > 0 || 'Select at least one technology',
-          },
-        ]));
-
-        proficiency = await selectPrompt<UserProficiency>({
-          message: 'Select your current proficiency level:',
-          default: config.userProfile.proficiency,
-          choices: [
-            { name: 'Beginner', value: 'beginner', description: 'New to the stack, prefer guided issues.' },
-            { name: 'Intermediate', value: 'intermediate', description: 'Comfortable with the stack, can handle moderate tasks.' },
-            { name: 'Advanced', value: 'advanced', description: 'Deep experience, ready for complex changes.' },
+      if (!ghValid) {
+        this.renderStep('github', completedSteps, 'GitHub credentials need to be retried.', true);
+        ui.callout({
+          label: 'OpenMeta Init',
+          title: 'GitHub validation failed',
+          subtitle: 'OpenMeta could not verify repository access with the token and username you entered.',
+          lines: [
+            'Suggested token scopes: repo, user',
+            'Check that the username matches the token owner.',
           ],
+          tone: 'warning',
         });
 
-        ({ focusAreas } = await prompt<{ focusAreas: string[] }>([
+        const { retry } = await prompt<{ retry: boolean }>([
           {
-            type: 'checkbox',
-            name: 'focusAreas',
-            message: '  Select your focus areas (Space to select, Enter to confirm):',
-            choices: FOCUS_AREA_CHOICES.map(area => ({ ...area, checked: config.userProfile.focusAreas.includes(area.value) })),
-            validate: (input: string[]) => input.length > 0 || 'Select at least one focus area',
+            type: 'confirm',
+            name: 'retry',
+            message: 'Try another GitHub token?',
+            default: true,
           },
-        ]));
-
-        completedSteps.add('profile');
-        await commit({ userProfile: { techStack, proficiency, focusAreas } });
-        ui.keyValues('Matching profile captured', [
-          { label: 'Tech stack', value: techStack.join(', '), tone: 'info' },
-          { label: 'Proficiency', value: proficiency, tone: 'info' },
-          { label: 'Focus areas', value: focusAreas.join(', '), tone: 'info' },
         ]);
-        return true;
-      },
-    );
+        if (!retry) {
+          ui.callout({
+            label: 'OpenMeta Init',
+            title: 'Setup paused',
+            subtitle: 'GitHub access was not configured. Run "openmeta init" again whenever you are ready.',
+            tone: 'warning',
+          });
+          return;
+        }
+      }
+    }
 
-    // ── Step 4: Target repo ───────────────────────────────────────────────────
+    completedSteps.add('github');
+    ui.keyValues('GitHub connected', [
+      { label: 'Username', value: username, tone: 'success' },
+      { label: 'Token', value: ui.maskSecret(pat), tone: 'success' },
+    ]);
+
+    this.renderStep('llm', completedSteps, 'Your model is used to score issues and draft research notes or diaries.');
+
+    let providerValue = '';
+    let selectedProvider = findLLMProviderPreset(config.llm.provider);
+    let modelValue = '';
+    let apiBaseUrl = '';
+    let apiHeaders: Record<string, string> = {};
+    let apiKey = '';
+    let llmValid = false;
+
+    while (!llmValid) {
+      providerValue = await selectPrompt<string>({
+        message: 'Select LLM provider:',
+        default: this.getProviderDefault(config.llm.provider),
+        choices: LLM_PROVIDER_PRESETS.map(provider => ({
+          name: provider.name,
+          value: provider.value,
+          description: provider.baseUrl || 'Bring your own compatible endpoint',
+        })),
+      });
+
+      selectedProvider = findLLMProviderPreset(providerValue as AppConfig['llm']['provider']);
+      if (!selectedProvider) {
+        throw new Error(`Provider not found: ${providerValue}`);
+      }
+
+      apiHeaders = selectedProvider.apiHeaders || {};
+      apiBaseUrl = selectedProvider.allowCustomBaseUrl
+        ? await this.promptApiBaseUrl(config.llm.apiBaseUrl)
+        : selectedProvider.baseUrl;
+
+      modelValue = selectedProvider.allowCustomModel
+        ? await this.promptModelName(config.llm.modelName)
+        : await selectPrompt<string>({
+          message: 'Select model:',
+          default: config.llm.modelName,
+          choices: selectedProvider.models.map((model) => ({
+            name: model.name,
+            value: model.value,
+          })),
+        });
+
+      apiKey = await this.promptAPIKey();
+
+      llmService.initialize(
+        apiKey,
+        apiBaseUrl,
+        modelValue,
+        apiHeaders,
+        selectedProvider.value as AppConfig['llm']['provider'],
+      );
+      llmValid = await this.validateLlmConnection();
+
+      if (!llmValid) {
+        // 保留底层失败原因，方便用户区分是鉴权、配额还是网关问题。
+        const validationDetail = llmService.getLastValidationError();
+        this.renderStep('llm', completedSteps, 'Provider validation needs to be retried.', true);
+        ui.callout({
+          label: 'OpenMeta Init',
+          title: 'LLM validation failed',
+          subtitle: 'OpenMeta could not connect to the configured provider with the selected model and API key.',
+          lines: [
+            'Check provider endpoint, model name, and API key.',
+            'If you use a proxy or compatible endpoint, confirm the base URL is correct.',
+            ...(validationDetail ? [`Provider detail: ${validationDetail}`] : []),
+          ],
+          tone: 'warning',
+        });
+
+        const { retry } = await prompt<{ retry: boolean }>([
+          {
+            type: 'confirm',
+            name: 'retry',
+            message: 'Try another provider or API key?',
+            default: true,
+          },
+        ]);
+        if (!retry) {
+          ui.callout({
+            label: 'OpenMeta Init',
+            title: 'Setup paused',
+            subtitle: 'The LLM provider was not configured. Run "openmeta init" again when you want to continue.',
+            tone: 'warning',
+          });
+          return;
+        }
+      }
+    }
+
+    completedSteps.add('llm');
+    ui.keyValues('LLM provider connected', [
+      { label: 'Provider', value: selectedProvider!.name, tone: 'success' },
+      { label: 'Model', value: modelValue, tone: 'success' },
+      { label: 'Endpoint', value: apiBaseUrl, tone: 'info' },
+      { label: 'Extra headers', value: Object.keys(apiHeaders).length > 0 ? JSON.stringify(apiHeaders) : '(none)', tone: 'info' },
+      { label: 'API key', value: ui.maskSecret(apiKey), tone: 'success' },
+    ]);
+
+    this.renderStep('profile', completedSteps, 'Choose the stack and focus areas that should influence issue scoring.');
+
+    const { techStack } = await prompt<{
+      techStack: string[];
+    }>([
+      {
+        type: 'checkbox',
+        name: 'techStack',
+        message: '  Select your tech stack:',
+        choices: TECH_STACK_CHOICES.map(tech => ({
+          name: tech,
+          value: tech,
+          checked: config.userProfile.techStack.includes(tech),
+        })),
+        validate: (input: string[]) => input.length > 0 || 'Select at least one technology',
+      },
+    ]);
+
+    const proficiency = await selectPrompt<UserProficiency>({
+      message: 'Select your current proficiency level:',
+      default: config.userProfile.proficiency,
+      choices: [
+        { name: 'Beginner', value: 'beginner', description: 'New to the stack, prefer guided issues.' },
+        { name: 'Intermediate', value: 'intermediate', description: 'Comfortable with the stack, can handle moderate tasks.' },
+        { name: 'Advanced', value: 'advanced', description: 'Deep experience, ready for complex changes.' },
+      ],
+    });
+
+    const { focusAreas } = await prompt<{
+      focusAreas: string[];
+    }>([
+      {
+        type: 'checkbox',
+        name: 'focusAreas',
+        message: '  Select your focus areas:',
+        choices: FOCUS_AREA_CHOICES.map(area => ({
+          ...area,
+          checked: config.userProfile.focusAreas.includes(area.value),
+        })),
+        validate: (input: string[]) => input.length > 0 || 'Select at least one focus area',
+      },
+    ]);
+
+    completedSteps.add('profile');
+    ui.keyValues('Matching profile captured', [
+      { label: 'Tech stack', value: techStack.join(', '), tone: 'info' },
+      { label: 'Proficiency', value: proficiency, tone: 'info' },
+      { label: 'Focus areas', value: focusAreas.join(', '), tone: 'info' },
+    ]);
 
     this.renderStep('targetRepo', completedSteps, 'Leave this blank if you want OpenMeta to manage a dedicated private repo for you.');
 
@@ -346,27 +292,42 @@ export class InitOrchestrator {
         default: config.github.targetRepoPath || '',
         filter: (input: string) => input.trim(),
         validate: async (input: string) => {
-          if (!input) return true;
-          if (!existsSync(input)) return 'This path does not exist.';
+          if (!input) {
+            return true;
+          }
+
+          if (!existsSync(input)) {
+            return 'This path does not exist.';
+          }
+
           const isValidRepo = await githubService.validateTargetRepo(input);
-          if (!isValidRepo) return 'This path must be a git repository with a configured remote.';
+          if (!isValidRepo) {
+            return 'This path must be a git repository with a configured remote.';
+          }
+
           return true;
         },
       },
     ]);
 
     completedSteps.add('targetRepo');
-    await commit({ github: { targetRepoPath: targetRepoPath || undefined } });
     ui.keyValues('Target repository policy', [
-      { label: 'Publish destination', value: targetRepoPath || 'Auto-managed private repository', tone: targetRepoPath ? 'info' : 'accent' },
+      {
+        label: 'Publish destination',
+        value: targetRepoPath || 'Auto-managed private repository',
+        tone: targetRepoPath ? 'info' : 'accent',
+      },
     ]);
-
-    // ── Step 5: Automation ────────────────────────────────────────────────────
 
     this.renderStep('automation', completedSteps, 'OpenMeta can install a system scheduler so one init keeps your autonomous contribution agent running unattended.');
 
     const { automationEnabled } = await prompt<{ automationEnabled: boolean }>([
-      { type: 'confirm', name: 'automationEnabled', message: 'Enable unattended agent automation?', default: config.automation.enabled },
+      {
+        type: 'confirm',
+        name: 'automationEnabled',
+        message: 'Enable unattended agent automation?',
+        default: config.automation.enabled,
+      },
     ]);
 
     let scheduleTime = config.automation.scheduleTime;
@@ -402,36 +363,77 @@ export class InitOrchestrator {
           label: 'OpenMeta Init',
           title: 'Automation not enabled',
           subtitle: 'Persistent unattended execution was cancelled before any scheduler changes were made.',
-          lines: ['You can still run "openmeta daily" manually.', 'Enable later with "openmeta init" or "openmeta automation enable".'],
+          lines: [
+            'You can still run "openmeta daily" manually.',
+            'Enable later with "openmeta init" or "openmeta automation enable".',
+          ],
           tone: 'warning',
         });
         return;
       }
     }
 
-    await ui.task(
-      { title: 'Saving local configuration', doneMessage: 'Local configuration saved', failedMessage: 'Saving local configuration failed', tone: 'info' },
-      async () => commit({ automation: { enabled: automationEnabled, scheduleTime, timezone, contentType, scheduler } }),
-    );
+    const newConfig: AppConfig = {
+      ...config,
+      userProfile: {
+        techStack,
+        proficiency,
+        focusAreas,
+      },
+      github: {
+        pat,
+        username,
+        targetRepoPath: targetRepoPath || undefined,
+      },
+      llm: {
+        provider: providerValue as AppConfig['llm']['provider'],
+        apiBaseUrl,
+        apiKey,
+        modelName: modelValue,
+        apiHeaders,
+      },
+      automation: {
+        ...config.automation,
+        enabled: automationEnabled,
+        scheduleTime,
+        timezone,
+        contentType,
+        scheduler,
+      },
+    };
 
-    const schedulerResult = await ui.task(
-      { title: 'Syncing automation policy', doneMessage: 'Automation policy synced', failedMessage: 'Automation policy sync failed', tone: automationEnabled ? 'warning' : 'info' },
-      async () => schedulerService.sync(workingConfig),
-    );
-    const nextStepMessage = this.getNextStepMessage(workingConfig, schedulerResult);
+    await ui.task({
+      title: 'Saving local configuration',
+      doneMessage: 'Local configuration saved',
+      failedMessage: 'Saving local configuration failed',
+      tone: 'info',
+    }, async () => {
+      await configService.save(newConfig);
+    });
+
+    const schedulerResult = await ui.task({
+      title: 'Syncing automation policy',
+      doneMessage: 'Automation policy synced',
+      failedMessage: 'Automation policy sync failed',
+      tone: automationEnabled ? 'warning' : 'info',
+    }, async () => schedulerService.sync(newConfig));
+    const nextStepMessage = this.getNextStepMessage(newConfig, schedulerResult);
     completedSteps.add('automation');
 
     ui.hero({
       label: 'OpenMeta Init',
       title: 'The cockpit is wired and ready',
       subtitle: 'OpenMeta now has enough shape to scout, draft, and automate with intention instead of guesswork.',
-      lines: [`Config saved at: ${configService.getConfigPath()}`, nextStepMessage],
+      lines: [
+        `Config saved at: ${configService.getConfigPath()}`,
+        nextStepMessage,
+      ],
       tone: schedulerResult.status === 'failed' ? 'warning' : 'success',
     });
 
     ui.stats('Setup summary', [
       { label: 'GitHub', value: username, tone: 'success' },
-      { label: 'Model', value: modelValue, hint: selectedProvider?.name, tone: 'success' },
+      { label: 'Model', value: modelValue, hint: selectedProvider!.name, tone: 'success' },
       { label: 'Repo policy', value: targetRepoPath ? 'CUSTOM' : 'MANAGED', tone: 'accent' },
       { label: 'Automation', value: automationEnabled ? 'ENABLED' : 'MANUAL', tone: automationEnabled ? 'warning' : 'muted' },
     ]);
@@ -440,7 +442,7 @@ export class InitOrchestrator {
       { label: 'Proficiency', value: proficiency, tone: 'info' },
       { label: 'Focus areas', value: focusAreas.join(', '), tone: 'info' },
       { label: 'Target repo', value: targetRepoPath || 'Auto-managed private repository', tone: 'info' },
-      { label: 'Automation', value: this.formatAutomationSummary(workingConfig, schedulerResult), tone: schedulerResult.status === 'failed' ? 'warning' : 'success' },
+      { label: 'Automation', value: this.formatAutomationSummary(newConfig, schedulerResult), tone: schedulerResult.status === 'failed' ? 'warning' : 'success' },
     ]);
   }
 
