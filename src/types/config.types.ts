@@ -15,7 +15,7 @@ export interface GitHubConfig {
   targetRepoPath?: string;
 }
 
-export type LLMProvider = 'openai' | 'minimax' | 'moonshot' | 'zhipu' | 'custom';
+export type LLMProvider = 'openai' | 'minimax' | 'moonshot' | 'zhipu' | 'gemini' | 'claude' | 'custom';
 
 export interface LLMConfig {
   provider: LLMProvider;

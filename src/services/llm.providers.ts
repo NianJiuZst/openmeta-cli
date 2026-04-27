@@ -65,6 +65,33 @@ export const LLM_PROVIDER_PRESETS: LLMProviderPreset[] = [
     ],
   },
   {
+    name: 'Gemini (Google AI)',
+    value: 'gemini',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+    models: [
+      { name: 'Gemini 3.1 Pro (Preview)', value: 'gemini-3.1-pro-preview' },
+      { name: 'Gemini 3.1 Flash-Lite (Preview)', value: 'gemini-3.1-flash-lite-preview' },
+      { name: 'Gemini 3 Flash (Preview)', value: 'gemini-3-flash-preview' },
+      { name: 'Gemini 2.5 Pro', value: 'gemini-2.5-pro' },
+      { name: 'Gemini 2.5 Flash', value: 'gemini-2.5-flash' },
+      { name: 'Gemini 2.5 Flash-Lite', value: 'gemini-2.5-flash-lite' },
+    ],
+  },
+  {
+    name: 'Claude (Anthropic)',
+    value: 'claude',
+    baseUrl: 'https://api.anthropic.com/v1/',
+    models: [
+    { name: 'Claude Opus 4.7', value: 'claude-opus-4-7' },
+    { name: 'Claude Opus 4.6', value: 'claude-opus-4-6' },
+    { name: 'Claude Opus 4.5', value: 'claude-opus-4-5' },
+    { name: 'Claude Opus 4.1', value: 'claude-opus-4-1' },
+    { name: 'Claude Sonnet 4.6', value: 'claude-sonnet-4-6' },
+    { name: 'Claude Sonnet 4.5', value: 'claude-sonnet-4-5' },
+    { name: 'Claude Haiku 4.5', value: 'claude-haiku-4-5-20251001' },
+    ],
+  },
+  {
     name: 'Custom (OpenAI-compatible)',
     value: 'custom',
     baseUrl: '',
