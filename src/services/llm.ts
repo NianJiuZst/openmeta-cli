@@ -531,19 +531,22 @@ Repo Stars: ${i.repoStars}`
     }
 
     // 这里只要求标准 chat.completions 结构里存在可用文本，尽早拦住错误的自定义 base URL。
-    const content = 'choices' in response &&
+    // 部分 reasoning 模型（如 DeepSeek v4）在思考模式下 content 为空，但 reasoning_content 有值，两者都视为有效回复。
+    const message = 'choices' in response &&
       Array.isArray(response.choices) &&
       response.choices[0] &&
       typeof response.choices[0] === 'object' &&
       response.choices[0] !== null &&
       'message' in response.choices[0] &&
       typeof response.choices[0].message === 'object' &&
-      response.choices[0].message !== null &&
-      'content' in response.choices[0].message
-      ? response.choices[0].message.content
+      response.choices[0].message !== null
+      ? response.choices[0].message as Record<string, unknown>
       : undefined;
 
-    if (typeof content !== 'string' || content.trim().length === 0) {
+    const hasContent = typeof message?.['content'] === 'string' && (message['content'] as string).trim().length > 0;
+    const hasReasoningContent = typeof message?.['reasoning_content'] === 'string' && (message['reasoning_content'] as string).trim().length > 0;
+
+    if (!hasContent && !hasReasoningContent) {
       throw new Error('Custom provider validation response did not include a usable assistant reply.');
     }
   }
