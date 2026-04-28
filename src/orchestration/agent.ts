@@ -44,6 +44,7 @@ export interface AgentRunOptions {
   runChecks?: boolean;
   draftOnly?: boolean;
   refresh?: boolean;
+  dryRun?: boolean;
 }
 
 export interface ScoutRunOptions {
@@ -366,6 +367,7 @@ export class AgentOrchestrator {
     const publishResult = await this.publishArtifactsIfNeeded({
       config,
       headless,
+      dryRun: options.dryRun,
       issue: selectedIssue,
       patchDraftMarkdown,
       prDraftMarkdown,
@@ -1398,6 +1400,7 @@ export class AgentOrchestrator {
     config: AppConfig;
     allowRealPr?: boolean;
     headless: boolean;
+    dryRun?: boolean;
     issue: RankedIssue;
     patchDraftMarkdown: string;
     prDraftMarkdown: string;
@@ -1410,6 +1413,32 @@ export class AgentOrchestrator {
     pullRequestUrl?: string;
   }): Promise<{ published: boolean }> {
     const artifactRelativeDir = join('contributions', getLocalDateStamp(), `${input.issue.repoFullName.replace(/\//g, '__')}__${input.issue.number}`);
+
+    if (input.dryRun) {
+      ui.callout({
+        label: 'Dry-run Mode',
+        title: 'Artifact preview (no git changes)',
+        subtitle: 'The following artifacts would be published:',
+        lines: [
+          `${artifactRelativeDir}/dossier.md`,
+          `${artifactRelativeDir}/patch-draft.md`,
+          `${artifactRelativeDir}/pr-draft.md`,
+          `memory/${input.issue.repoFullName.replace(/\//g, '__')}.md`,
+          'INBOX.md',
+          'PROOF_OF_WORK.md',
+        ],
+        tone: 'info',
+      });
+
+      ui.keyValues('Dry-run preview', [
+        { label: 'Issue', value: `${input.issue.repoFullName}#${input.issue.number}` },
+        { label: 'Dossier', value: input.dossier.slice(0, 100) + '...' },
+        { label: 'Changed files', value: input.changedFiles.length > 0 ? input.changedFiles.join(', ') : '(none)' },
+      ]);
+
+      return { published: false };
+    }
+
     const shouldCommit = input.headless ? true : await this.promptForCommitConfirmation();
     if (!shouldCommit) {
       return { published: false };
