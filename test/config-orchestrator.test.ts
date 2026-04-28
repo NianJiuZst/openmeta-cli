@@ -46,4 +46,39 @@ describe('ConfigOrchestrator', () => {
     expect(loaded.github.pat).toBe('ghp_new_secret');
     expect(loaded.llm.apiKey).toBe('sk-new-secret');
   });
+
+  test('sets llm.provider to gemini', async () => {
+    const orchestrator = new ConfigOrchestrator();
+
+    await orchestrator.set('llm.provider', 'gemini');
+
+    const loaded = await new ConfigService().load();
+    expect(loaded.llm.provider).toBe('gemini');
+  });
+
+  test('sets llm.provider to claude', async () => {
+    const orchestrator = new ConfigOrchestrator();
+
+    await orchestrator.set('llm.provider', 'claude');
+
+    const loaded = await new ConfigService().load();
+    expect(loaded.llm.provider).toBe('claude');
+  });
+
+  test('rejects invalid llm.provider', async () => {
+    const orchestrator = new ConfigOrchestrator();
+
+    await expect(orchestrator.set('llm.provider', 'invalid_provider')).rejects.toThrow(/llm.provider must be/);
+  });
+
+  test('accepts all valid llm.provider values', async () => {
+    const orchestrator = new ConfigOrchestrator();
+    const validProviders = ['openai', 'minimax', 'moonshot', 'zhipu', 'gemini', 'claude', 'custom'];
+
+    for (const provider of validProviders) {
+      await orchestrator.set('llm.provider', provider);
+      const loaded = await new ConfigService().load();
+      expect(loaded.llm.provider).toBe(provider);
+    }
+  });
 });

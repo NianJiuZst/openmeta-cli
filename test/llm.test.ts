@@ -14,7 +14,7 @@ interface LLMServiceInternals {
       };
     };
   } | null;
-  provider: 'openai' | 'minimax' | 'moonshot' | 'zhipu' | 'custom';
+  provider: 'openai' | 'minimax' | 'moonshot' | 'zhipu' | 'gemini' | 'claude' | 'custom';
   parseImplementationDraft(content: string): {
     status: StructuredOutputStatus;
     data: ImplementationDraft;
