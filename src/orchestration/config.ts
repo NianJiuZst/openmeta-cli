@@ -58,11 +58,13 @@ export class ConfigOrchestrator {
     ]);
 
     ui.keyValues('LLM', [
+      { label: 'Active profile', value: config.llm.activeProfile || '(none)', tone: config.llm.activeProfile ? 'success' : 'muted' },
       { label: 'Provider', value: config.llm.provider || '(not set)', tone: config.llm.provider ? 'info' : 'warning' },
       { label: 'Base URL', value: config.llm.apiBaseUrl || '(not set)', tone: config.llm.apiBaseUrl ? 'info' : 'warning' },
       { label: 'Model', value: config.llm.modelName || '(not set)', tone: config.llm.modelName ? 'info' : 'warning' },
       { label: 'Extra headers', value: Object.keys(config.llm.apiHeaders || {}).length > 0 ? JSON.stringify(config.llm.apiHeaders) : '(none)', tone: 'info' },
       { label: 'API key', value: ui.maskSecret(config.llm.apiKey), tone: config.llm.apiKey ? 'info' : 'warning' },
+      { label: 'Saved profiles', value: String(Object.keys(config.llm.profiles || {}).length), tone: Object.keys(config.llm.profiles || {}).length > 0 ? 'info' : 'muted' },
     ]);
 
     ui.keyValues('Automation', [

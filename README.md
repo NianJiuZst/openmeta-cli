@@ -535,6 +535,11 @@ If you already built the binary:
 | `openmeta pow` | Show proof-of-work history |
 | `openmeta runs` | Show recent command runs, durations, and failure reasons |
 | `openmeta runs <id>` | Inspect one recorded run |
+| `openmeta provider list` | List saved LLM provider profiles |
+| `openmeta provider save <name>` | Save current LLM settings as a reusable provider profile |
+| `openmeta provider add <name>` | Add a provider profile from command-line values |
+| `openmeta provider use <name>` | Switch the active LLM provider to a saved profile |
+| `openmeta provider remove <name>` | Remove a saved provider profile |
 | `openmeta automation status` | Show automation status |
 | `openmeta automation enable` | Enable daily unattended automation |
 | `openmeta automation disable` | Disable daily unattended automation |
