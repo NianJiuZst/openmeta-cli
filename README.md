@@ -548,6 +548,14 @@ If you already built the binary:
 | `openmeta config set <key> <value>` | Update a config value |
 | `openmeta config reset` | Reset configuration |
 
+Example provider workflow:
+
+```bash
+openmeta provider config
+openmeta provider save production
+openmeta provider use production --validate
+```
+
 ### Local Paths and Assets
 
 OpenMeta keeps a clear local footprint:

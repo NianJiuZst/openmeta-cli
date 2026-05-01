@@ -16,10 +16,6 @@ interface ProviderUseOptions {
   validate?: boolean;
 }
 
-function normalizeProviderName(name: string): string {
-  return name.trim();
-}
-
 function parseHeaders(values: string[] = []): Record<string, string> {
   const headers: Record<string, string> = {};
 
@@ -140,7 +136,7 @@ export class ProviderOrchestrator {
       apiBaseUrl: requireValue(options.baseUrl, 'base URL'),
       modelName: requireValue(options.model, 'model'),
       apiKey: requireValue(options.apiKey, 'API key'),
-      apiHeaders: parseHeaders(options.header),
+      apiHeaders: parseHeaders(options.header?.filter(Boolean) ?? []),
     };
     const updated = await this.saveProfile(config, name, profile, config.llm.activeProfile);
 
@@ -335,8 +331,9 @@ export class ProviderOrchestrator {
       llm: {
         ...config.llm,
         ...profile,
+        apiHeaders: profile.apiHeaders ?? config.llm.apiHeaders ?? {},
         activeProfile: name,
-        profiles: config.llm.profiles || {},
+        profiles: config.llm.profiles ?? {},
       },
     });
 
@@ -396,7 +393,7 @@ export class ProviderOrchestrator {
   }
 
   private normalizeProfileName(nameInput: string): string {
-    const name = normalizeProviderName(nameInput);
+    const name = nameInput.trim();
     if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(name)) {
       throw new Error('Provider profile name must start with a letter or number and may contain letters, numbers, dots, underscores, or dashes.');
     }
@@ -431,11 +428,11 @@ export class ProviderOrchestrator {
 
   private currentProfileFromConfig(config: AppConfig): LLMProviderProfile {
     return {
-      provider: config.llm.provider,
+      provider: parseProvider(config.llm.provider),
       apiBaseUrl: config.llm.apiBaseUrl,
       apiKey: config.llm.apiKey,
       modelName: config.llm.modelName,
-      apiHeaders: config.llm.apiHeaders || {},
+      apiHeaders: config.llm.apiHeaders ?? {},
     };
   }
 
@@ -450,8 +447,11 @@ export class ProviderOrchestrator {
         ...config.llm,
         activeProfile: activeProfile || '',
         profiles: {
-          ...(config.llm.profiles || {}),
-          [name]: profile,
+          ...(config.llm.profiles ?? {}),
+          [name]: {
+            ...profile,
+            apiHeaders: profile.apiHeaders ?? {},
+          },
         },
       },
     });

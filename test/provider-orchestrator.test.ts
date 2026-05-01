@@ -82,6 +82,69 @@ describe('ProviderOrchestrator', () => {
     expect(loaded.llm.activeProfile).toBe('henng-gpt54');
   });
 
+  test('preserves config apiHeaders when a saved profile omits them', async () => {
+    const config = await configService.get();
+    await configService.save({
+      ...config,
+      llm: {
+        ...config.llm,
+        provider: 'custom',
+        apiBaseUrl: 'https://example.com/v1',
+        modelName: 'example-model',
+        apiKey: 'sk-secret',
+        apiHeaders: { 'X-Keep': 'yes' },
+        profiles: {
+          legacy: {
+            provider: 'custom',
+            apiBaseUrl: 'https://legacy.example.com/v1',
+            modelName: 'legacy-model',
+            apiKey: 'sk-legacy',
+          } as never,
+        },
+      },
+    });
+
+    const orchestrator = new ProviderOrchestrator();
+    await orchestrator.use('legacy');
+
+    const loaded = await configService.get();
+    expect(loaded.llm.apiHeaders).toEqual({ 'X-Keep': 'yes' });
+  });
+
+  test('rejects invalid providers when saving the current config as a profile', async () => {
+    const orchestrator = new ProviderOrchestrator();
+    const config = await configService.get();
+    await configService.save({
+      ...config,
+      llm: {
+        ...config.llm,
+        provider: 'invalid-provider' as never,
+      },
+    });
+
+    await expect(orchestrator.save('broken')).rejects.toThrow('provider must be');
+  });
+
+  test('rejects invalid header values when adding a provider profile', async () => {
+    const orchestrator = new ProviderOrchestrator();
+
+    await expect(orchestrator.add('broken-header', {
+      provider: 'custom',
+      baseUrl: 'https://example.com/v1',
+      model: 'example-model',
+      apiKey: 'sk-secret',
+      header: [''],
+    })).resolves.toBeUndefined();
+
+    await expect(orchestrator.add('invalid-header', {
+      provider: 'custom',
+      baseUrl: 'https://example.com/v1',
+      model: 'example-model',
+      apiKey: 'sk-secret',
+      header: ['not-a-header'],
+    })).rejects.toThrow('must use key=value format');
+  });
+
   test('removes provider profiles without changing the active provider settings', async () => {
     const orchestrator = new ProviderOrchestrator();
 

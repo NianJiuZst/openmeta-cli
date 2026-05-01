@@ -22,7 +22,7 @@ export interface LLMProviderProfile {
   apiBaseUrl: string;
   apiKey: string;
   modelName: string;
-  apiHeaders?: Record<string, string>;
+  apiHeaders: Record<string, string>;
 }
 
 export interface LLMConfig {
