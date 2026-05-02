@@ -5,6 +5,7 @@ export { registerScoutCommand } from './scout.js';
 export { registerInboxCommand } from './inbox.js';
 export { registerPowCommand } from './pow.js';
 export { registerConfigCommand } from './config.js';
+export { registerProviderCommand } from './provider.js';
 export { registerAutomationCommand } from './automation.js';
 export { registerDoctorCommand } from './doctor.js';
 export { registerRunsCommand } from './runs.js';

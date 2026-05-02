@@ -43,6 +43,8 @@ function createDefaultConfig(): AppConfig {
       apiKey: '',
       modelName: 'gpt-4o-mini',
       apiHeaders: {},
+      activeProfile: '',
+      profiles: {},
     },
     automation: {
       enabled: false,
@@ -133,6 +135,10 @@ export class ConfigService {
     if (encrypted.llm.apiKey) {
       encrypted.llm = { ...encrypted.llm, apiKey: CryptoService.encrypt(encrypted.llm.apiKey) };
     }
+    encrypted.llm = {
+      ...encrypted.llm,
+      profiles: this.encryptProviderProfiles(encrypted.llm.profiles),
+    };
     return encrypted;
   }
 
@@ -144,6 +150,10 @@ export class ConfigService {
     if (decrypted.llm.apiKey && CryptoService.isEncrypted(decrypted.llm.apiKey)) {
       decrypted.llm = { ...decrypted.llm, apiKey: CryptoService.decrypt(decrypted.llm.apiKey) };
     }
+    decrypted.llm = {
+      ...decrypted.llm,
+      profiles: this.decryptProviderProfiles(decrypted.llm.profiles),
+    };
     return decrypted;
   }
 
@@ -168,12 +178,46 @@ export class ConfigService {
       llm: {
         ...defaults.llm,
         ...config.llm,
+        apiHeaders: {
+          ...defaults.llm.apiHeaders,
+          ...config.llm?.apiHeaders,
+        },
+        profiles: {
+          ...defaults.llm.profiles,
+          ...config.llm?.profiles,
+        },
       },
       automation: {
         ...defaults.automation,
         ...config.automation,
       },
     };
+  }
+
+  private encryptProviderProfiles(
+    profiles: AppConfig['llm']['profiles'] = {},
+  ): AppConfig['llm']['profiles'] {
+    return Object.fromEntries(Object.entries(profiles).map(([name, profile]) => [
+      name,
+      {
+        ...profile,
+        apiKey: profile.apiKey ? CryptoService.encrypt(profile.apiKey) : '',
+      },
+    ]));
+  }
+
+  private decryptProviderProfiles(
+    profiles: AppConfig['llm']['profiles'] = {},
+  ): AppConfig['llm']['profiles'] {
+    return Object.fromEntries(Object.entries(profiles).map(([name, profile]) => [
+      name,
+      {
+        ...profile,
+        apiKey: profile.apiKey && CryptoService.isEncrypted(profile.apiKey)
+          ? CryptoService.decrypt(profile.apiKey)
+          : profile.apiKey,
+      },
+    ]));
   }
 }
 

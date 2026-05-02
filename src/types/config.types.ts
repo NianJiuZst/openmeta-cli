@@ -17,12 +17,22 @@ export interface GitHubConfig {
 
 export type LLMProvider = 'openai' | 'minimax' | 'moonshot' | 'zhipu' | 'gemini' | 'claude' | 'custom';
 
+export interface LLMProviderProfile {
+  provider: LLMProvider;
+  apiBaseUrl: string;
+  apiKey: string;
+  modelName: string;
+  apiHeaders: Record<string, string>;
+}
+
 export interface LLMConfig {
   provider: LLMProvider;
   apiBaseUrl: string;
   apiKey: string;
   modelName: string;
   apiHeaders?: Record<string, string>;
+  activeProfile?: string;
+  profiles?: Record<string, LLMProviderProfile>;
 }
 
 export interface AutomationConfig {

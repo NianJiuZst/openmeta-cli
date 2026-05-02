@@ -9,6 +9,7 @@ import {
   registerInboxCommand,
   registerInitCommand,
   registerPowCommand,
+  registerProviderCommand,
   registerRunsCommand,
   registerScoutCommand,
 } from './commands/index.js';
@@ -34,6 +35,7 @@ async function main(): Promise<void> {
   registerInboxCommand(program);
   registerPowCommand(program);
   registerConfigCommand(program);
+  registerProviderCommand(program);
   registerAutomationCommand(program);
   registerDoctorCommand(program);
   registerRunsCommand(program);
