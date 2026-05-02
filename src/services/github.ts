@@ -356,7 +356,8 @@ export class GitHubService {
             per_page: SEARCH_RESULTS_PER_PAGE,
           },
         )) {
-          items.push(...(response.data.items as SearchIssueItem[]));
+          const pageItems = (response as unknown as { data: { items: SearchIssueItem[] } }).data.items;
+          items.push(...pageItems);
         }
         return items;
       } catch (error) {
