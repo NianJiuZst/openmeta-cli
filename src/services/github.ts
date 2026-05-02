@@ -20,8 +20,10 @@ const ACTION_BLOCKING_LABELS = [
   'discussion',
   'wontfix',
 ] as const;
-const SEARCH_RESULTS_PER_GROUP = 30;
+const SEARCH_RESULTS_PER_PAGE = 30;
 const SEARCH_CACHE_TTL_MS = 10 * 60 * 1000;
+const MAX_PAGINATION_RETRIES = 3;
+const RATE_LIMIT_RETRY_BASE_DELAY_MS = 1000;
 
 type SearchIssueItem =
   RestEndpointMethodTypes['search']['issuesAndPullRequests']['response']['data']['items'][number];
@@ -102,17 +104,12 @@ export class GitHubService {
       for (const labelGroup of FILTER_LABEL_GROUPS) {
         try {
           const searchQuery = this.buildSearchQuery(labelGroup);
-          const response = await this.octokit.rest.search.issuesAndPullRequests({
-            q: searchQuery,
-            sort: 'updated',
-            order: 'desc',
-            per_page: SEARCH_RESULTS_PER_GROUP,
-          });
+          const items = await this.paginateSearchWithRetry(searchQuery);
 
           logger.debug(`Search query: ${searchQuery}`);
-          logger.debug(`Total results for "${labelGroup.join(' / ')}": ${response.data.total_count}`);
+          logger.debug(`Fetched ${items.length} total results for "${labelGroup.join(' / ')}"`);
 
-          for (const item of response.data.items) {
+          for (const item of items) {
             if (!this.shouldIncludeIssue(item)) {
               continue;
             }
@@ -339,6 +336,61 @@ export class GitHubService {
       reason: err.message || 'Unknown GitHub API error.',
       rateLimited: false,
     };
+  }
+
+  private async paginateSearchWithRetry(searchQuery: string): Promise<SearchIssueItem[]> {
+    if (!this.octokit) {
+      throw new Error('GitHub service not initialized');
+    }
+
+    let attempt = 0;
+    while (attempt < MAX_PAGINATION_RETRIES) {
+      try {
+        const items: SearchIssueItem[] = [];
+        for await (const response of this.octokit.paginate.iterator(
+          this.octokit.rest.search.issuesAndPullRequests,
+          {
+            q: searchQuery,
+            sort: 'updated',
+            order: 'desc',
+            per_page: SEARCH_RESULTS_PER_PAGE,
+          },
+        )) {
+          const pageItems = (response as unknown as { data: { items: SearchIssueItem[] } }).data.items;
+          items.push(...pageItems);
+        }
+        return items;
+      } catch (error) {
+        attempt++;
+        const err = error as { status?: number; headers?: Record<string, string> };
+        const isRateLimit = err.status === 403 || err.status === 429;
+
+        if (isRateLimit && attempt < MAX_PAGINATION_RETRIES) {
+          const resetHeader = err.headers?.['x-ratelimit-reset'];
+          let delayMs = RATE_LIMIT_RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1);
+
+          if (resetHeader) {
+            const resetTime = parseInt(resetHeader, 10) * 1000;
+            const waitMs = resetTime - Date.now();
+            if (waitMs > 0 && waitMs < 60_000) {
+              delayMs = Math.min(waitMs + 500, 60_000);
+            }
+          }
+
+          logger.warn(`Rate limited during pagination (attempt ${attempt}/${MAX_PAGINATION_RETRIES}). Retrying in ${Math.round(delayMs / 1000)}s...`);
+          await this.delay(delayMs);
+          continue;
+        }
+
+        throw error;
+      }
+    }
+
+    throw new Error(`Pagination exhausted after ${MAX_PAGINATION_RETRIES} attempts`);
+  }
+
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   private buildDiscoveryFailureMessage(failures: SearchFailure[]): string {
