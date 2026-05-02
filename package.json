@@ -4,6 +4,9 @@
   "description": "OpenMeta CLI - Developer's daily open source growth companion",
   "type": "module",
   "private": true,
+  "engines": {
+    "bun": ">=1.0.0"
+  },
   "bin": {
     "openmeta": "./bin/openmeta.js"
   },
@@ -12,9 +15,13 @@
     "dev": "bun run ./src/cli.ts",
     "start": "bun run ./src/cli.ts",
     "typecheck": "bunx tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "lint": "bunx biome lint .",
+    "format": "bunx biome format --write .",
+    "check": "bunx biome check ."
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.14",
     "@types/bun": "latest",
     "@types/crypto-js": "^4.2.2"
   },

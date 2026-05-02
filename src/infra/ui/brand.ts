@@ -5,8 +5,11 @@ const OPENMETA_WORDMARK_LINES = String.raw`
  | |_| |  __/| |___| |\  | |  | | |___  | |/ ___ \ 
   \___/|_|   |_____|_| \_|_|  |_|_____| |_/_/   \_\
                                                    
-`.slice(1).trimEnd().split('\n');
+`
+	.slice(1)
+	.trimEnd()
+	.split("\n");
 
 export function getOpenMetaWordmarkLines(): string[] {
-  return [...OPENMETA_WORDMARK_LINES];
+	return [...OPENMETA_WORDMARK_LINES];
 }

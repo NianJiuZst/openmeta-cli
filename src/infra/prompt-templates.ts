@@ -280,10 +280,13 @@ Validation Context:
 {{validationContext}}
 `;
 
-export function fillPrompt(template: string, data: Record<string, string>): string {
-  let result = template;
-  for (const [key, value] of Object.entries(data)) {
-    result = result.replace(new RegExp(`{{${key}}}`, 'g'), value);
-  }
-  return result;
+export function fillPrompt(
+	template: string,
+	data: Record<string, string>,
+): string {
+	let result = template;
+	for (const [key, value] of Object.entries(data)) {
+		result = result.replace(new RegExp(`{{${key}}}`, "g"), value);
+	}
+	return result;
 }
