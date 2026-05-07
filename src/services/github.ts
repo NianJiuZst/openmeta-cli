@@ -5,11 +5,39 @@ import { join } from 'path';
 import type { GitHubIssue } from '../types/index.js';
 import { ensureDirectory, getOpenMetaStateDir } from '../infra/index.js';
 import { logger } from '../infra/logger.js';
+import { configService } from '../infra/config.js';
+import { proofOfWorkService } from './proof-of-work.js';
 
 const FILTER_LABEL_GROUPS = [
-  ['good first issue', 'good-first-issue'],
-  ['help wanted', 'help-wanted'],
+  ['good first issue', 'good-first-issue', 'first-timers-only', 'beginner-friendly'],
+  ['help wanted', 'help-wanted', 'up-for-grabs', 'starter'],
+  ['low-hanging-fruit', 'easy', 'contribution-welcome'],
 ] as const;
+
+const TECH_TO_GITHUB_LANGUAGES: Record<string, string> = {
+  'node.js': 'JavaScript',
+  'javascript': 'JavaScript',
+  'typescript': 'TypeScript',
+  'python': 'Python',
+  'fastapi': 'Python',
+  'go': 'Go',
+  'golang': 'Go',
+  'java': 'Java',
+  'spring boot': 'Java',
+  'rust': 'Rust',
+  'c++': 'C++',
+  'c#': 'C#',
+  'ruby': 'Ruby',
+  'php': 'PHP',
+  'swift': 'Swift',
+  'kotlin': 'Kotlin',
+  'scala': 'Scala',
+  'elixir': 'Elixir',
+  'haskell': 'Haskell',
+  'lua': 'Lua',
+  'r': 'R',
+  'dart': 'Dart',
+};
 const ACTION_BLOCKING_LABELS = [
   'blocked',
   'duplicate',
@@ -20,7 +48,11 @@ const ACTION_BLOCKING_LABELS = [
   'discussion',
   'wontfix',
 ] as const;
-const SEARCH_RESULTS_PER_GROUP = 30;
+const WATCHED_REPOS: readonly string[] = [
+  'Hmbown/DeepSeek-TUI',
+] as const;
+
+const SEARCH_RESULTS_PER_GROUP = 50;
 const SEARCH_CACHE_TTL_MS = 10 * 60 * 1000;
 
 type SearchIssueItem =
@@ -99,9 +131,21 @@ export class GitHubService {
     const failures: SearchFailure[] = [];
 
     try {
+      // Build excluded repos from proof-of-work — only exclude repos where we actually submitted a PR
+      // Repos with only draft artifacts (no PR) can be reconsidered for new issues
+      const contributedRepos = new Set(
+        proofOfWorkService.load().records
+          .filter((r) => r.pullRequestUrl)
+          .map((r) => r.repoFullName),
+      );
+      if (contributedRepos.size > 0) {
+        logger.info(`Excluding ${contributedRepos.size} already-contributed repo(s) from search: ${[...contributedRepos].join(', ')}`);
+      }
+
       for (const labelGroup of FILTER_LABEL_GROUPS) {
+        const searchQueries = [this.buildSearchQuery(labelGroup)];
+        for (const searchQuery of searchQueries) {
         try {
-          const searchQuery = this.buildSearchQuery(labelGroup);
           const response = await this.octokit.rest.search.issuesAndPullRequests({
             q: searchQuery,
             sort: 'updated',
@@ -111,6 +155,9 @@ export class GitHubService {
 
           logger.debug(`Search query: ${searchQuery}`);
           logger.debug(`Total results for "${labelGroup.join(' / ')}": ${response.data.total_count}`);
+
+          // Small delay between requests to avoid secondary rate limiting
+          await new Promise(resolve => setTimeout(resolve, 2000));
 
           for (const item of response.data.items) {
             if (!this.shouldIncludeIssue(item)) {
@@ -124,6 +171,11 @@ export class GitHubService {
               continue;
             }
 
+            // Skip issues from already-contributed repos
+            if (contributedRepos.has(repoId.fullName)) {
+              continue;
+            }
+
             seenIssueKeys.add(issueKey);
             candidateItems.push(item);
           }
@@ -131,6 +183,47 @@ export class GitHubService {
           const failure = this.describeSearchFailure(error);
           failures.push({ labelGroup, ...failure });
           logger.warn(`Issue search failed for labels "${labelGroup.join('" / "')}". ${failure.reason}`);
+        }
+        }
+      }
+
+      // Also search watched repos directly (no label filter needed)
+      for (const repo of WATCHED_REPOS) {
+        try {
+          const searchQuery = `repo:${repo} is:issue is:open no:assignee`;
+          const response = await this.octokit.rest.search.issuesAndPullRequests({
+            q: searchQuery,
+            sort: 'updated',
+            order: 'desc',
+            per_page: SEARCH_RESULTS_PER_GROUP,
+          });
+
+          logger.debug(`Watched repo search: ${repo} -> ${response.data.total_count} results`);
+
+          // Small delay between requests
+          await new Promise(resolve => setTimeout(resolve, 2000));
+
+          for (const item of response.data.items) {
+            if (!this.shouldIncludeIssue(item)) {
+              continue;
+            }
+
+            const repoId = this.parseRepositoryUrl(item.repository_url);
+            const issueKey = `${repoId.fullName}#${item.number}`;
+
+            if (seenIssueKeys.has(issueKey)) {
+              continue;
+            }
+
+            if (contributedRepos.has(repoId.fullName)) {
+              continue;
+            }
+
+            seenIssueKeys.add(issueKey);
+            candidateItems.push(item);
+          }
+        } catch (error) {
+          logger.warn(`Watched repo search failed for ${repo}. Skipping.`);
         }
       }
 
@@ -191,9 +284,39 @@ export class GitHubService {
     return this.username;
   }
 
+  private async getUserLanguages(): Promise<string[]> {
+    try {
+      const config = await configService.load();
+      const techStack = config.userProfile?.techStack ?? [];
+      const languages = new Set<string>();
+      for (const tech of techStack) {
+        const lang = TECH_TO_GITHUB_LANGUAGES[tech.toLowerCase()];
+        if (lang) {
+          languages.add(lang);
+        }
+      }
+      return [...languages];
+    } catch {
+      return [];
+    }
+  }
+
   private buildSearchQuery(labels: readonly string[]): string {
     const joinedLabels = labels.map((label) => `label:"${label}"`).join(' OR ');
     return `(${joinedLabels}) archived:false is:issue is:open no:assignee`;
+  }
+
+  private async buildSearchQueries(labels: readonly string[]): Promise<string[]> {
+    const joinedLabels = labels.map((label) => `label:"${label}"`).join(' OR ');
+    const base = `(${joinedLabels}) archived:false is:issue is:open no:assignee`;
+    const languages = await this.getUserLanguages();
+
+    if (languages.length === 0) {
+      return [base];
+    }
+
+    // Return one query per language to diversify results across tech stack
+    return languages.map((lang) => `${base} language:"${lang}"`);
   }
 
   private shouldIncludeIssue(item: SearchIssueItem): boolean {
@@ -215,6 +338,46 @@ export class GitHubService {
 
     const labels = Array.isArray(item.labels) ? this.extractLabelNames(item) : [];
     return !this.hasActionBlockingLabel(labels);
+  }
+
+  async hasLinkedPR(repoFullName: string, issueNumber: number): Promise<{ hasPR: boolean; prUrl?: string }> {
+    if (!this.octokit) {
+      return { hasPR: false };
+    }
+
+    try {
+      const [owner, repo] = repoFullName.split('/');
+      const { data: timeline } = await this.octokit.rest.issues.listEventsForTimeline({
+        owner,
+        repo,
+        issue_number: issueNumber,
+        per_page: 100,
+      });
+
+      for (const event of timeline) {
+        if ('event' in event && event.event === 'cross-referenced' && 'source' in event) {
+          const source = (event as any).source;
+          const linkedIssue = source?.issue;
+          if (linkedIssue?.pull_request) {
+            const prState = linkedIssue.state;
+            const prUrl = linkedIssue.html_url;
+            if (prState === 'open') {
+              logger.info(`Issue ${repoFullName}#${issueNumber} has open linked PR: ${prUrl}`);
+              return { hasPR: true, prUrl };
+            }
+            if (linkedIssue.pull_request?.merged_at) {
+              logger.info(`Issue ${repoFullName}#${issueNumber} has merged linked PR: ${prUrl}`);
+              return { hasPR: true, prUrl };
+            }
+          }
+        }
+      }
+
+      return { hasPR: false };
+    } catch (error) {
+      logger.debug(`Failed to check linked PRs for ${repoFullName}#${issueNumber}`, error);
+      return { hasPR: false };
+    }
   }
 
   private hasActionBlockingLabel(labels: string[]): boolean {

@@ -174,9 +174,30 @@ export class AgentOrchestrator {
 
     this.renderAgentStage('select', completedStages, 'Review the top ranked issues and choose the next contribution target.');
     this.renderOpportunityList('Top ranked opportunities', rankedIssues.slice(0, 5));
-    const selectedIssue = headless
+    let selectedIssue = headless
       ? issueRankingService.selectIssueForAutomation(rankedIssues, config.automation.minMatchScore)
       : await this.promptForIssue(rankedIssues);
+
+    // In headless mode, verify the selected issue doesn't already have a linked PR
+    if (headless && selectedIssue) {
+      const linked = await githubService.hasLinkedPR(selectedIssue.repoFullName, selectedIssue.number);
+      if (linked.hasPR) {
+        logger.info(`Skipping ${selectedIssue.repoFullName}#${selectedIssue.number} - already has linked PR: ${linked.prUrl}`);
+        const candidates = rankedIssues.filter(
+          (i) => i.opportunity.overallScore >= config.automation.minMatchScore &&
+            `${i.repoFullName}#${i.number}` !== `${selectedIssue!.repoFullName}#${selectedIssue!.number}`
+        );
+        selectedIssue = undefined;
+        for (const candidate of candidates) {
+          const candidateLinked = await githubService.hasLinkedPR(candidate.repoFullName, candidate.number);
+          if (!candidateLinked.hasPR) {
+            selectedIssue = candidate;
+            break;
+          }
+          logger.info(`Skipping ${candidate.repoFullName}#${candidate.number} - already has linked PR: ${candidateLinked.prUrl}`);
+        }
+      }
+    }
 
     if (!selectedIssue) {
       ui.emptyState(
