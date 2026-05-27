@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { ensureDirectory, getOpenMetaStateDir, getLocalDateStamp } from '../infra/index.js';
 import type { RankedIssue, RepoMemory, RepoWorkspaceContext, TestResult } from '../types/index.js';
@@ -86,6 +86,18 @@ export class MemoryService {
     };
   }
 
+  private saveAtomic(repoFullName: string, data: RepoMemory): void {
+    const targetPath = this.getMemoryPath(repoFullName);
+    const tmpPath = `${targetPath}.tmp.${process.pid}`;
+    try {
+      writeFileSync(tmpPath, JSON.stringify(data, null, 2), "utf-8");
+      renameSync(tmpPath, targetPath);
+    } catch (error) {
+      try { unlinkSync(tmpPath); } catch { /* ignore cleanup failure */ }
+      throw error;
+    }
+  }
+
   update(issue: RankedIssue, workspace: RepoWorkspaceContext): RepoMemory {
     const current = this.load(issue.repoFullName);
     const now = new Date().toISOString();
@@ -119,7 +131,7 @@ export class MemoryService {
       ].slice(0, 10),
     };
 
-    writeFileSync(this.getMemoryPath(issue.repoFullName), JSON.stringify(next, null, 2), 'utf-8');
+    this.saveAtomic(issue.repoFullName, next);
     return next;
   }
 
@@ -184,7 +196,7 @@ export class MemoryService {
       ].slice(0, 10),
     };
 
-    writeFileSync(this.getMemoryPath(input.issue.repoFullName), JSON.stringify(next, null, 2), 'utf-8');
+    this.saveAtomic(input.issue.repoFullName, next);
     return next;
   }
 
