@@ -111,7 +111,14 @@ export class ConfigService {
 
   async update(partial: Partial<AppConfig>): Promise<AppConfig> {
     const current = await this.get();
-    const updated = { ...current, ...partial };
+    const updated: AppConfig = {
+      ...current,
+      ...partial,
+      userProfile: { ...current.userProfile, ...partial.userProfile },
+      github: { ...current.github, ...partial.github },
+      llm: { ...current.llm, ...partial.llm },
+      automation: { ...current.automation, ...partial.automation },
+    };
     await this.save(updated);
     return updated;
   }

@@ -51,7 +51,9 @@ export class ContentService {
       md += `- Link: ${issue.htmlUrl}\n`;
       md += `- Core Demand: ${issue.analysis.coreDemand}\n`;
       md += `- Tech Requirements: ${issue.analysis.techRequirements.join(', ')}\n`;
-      md += `- Solution Suggestion: ${issue.analysis.solutionSuggestion}\n`;
+      if (issue.analysis.solutionSuggestion) {
+        md += `- Solution Suggestion: ${issue.analysis.solutionSuggestion}\n`;
+      }
       md += `- Estimated Workload: ${issue.analysis.estimatedWorkload}\n\n`;
     }
 
