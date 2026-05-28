@@ -166,8 +166,8 @@ Supported LLM options currently include:
 Install dependencies:
 
 ```bash
+# 1. Install dependencies
 bun install
-```
 
 Build the CLI:
 

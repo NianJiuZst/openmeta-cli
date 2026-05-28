@@ -13,6 +13,9 @@ interface GitHubServiceInternals {
         issuesAndPullRequests: () => Promise<{ data: { total_count: number; items: unknown[] } }>;
       };
     };
+    paginate: {
+      iterator: (fn: unknown, params: unknown) => AsyncIterable<unknown>;
+    };
   } | null;
   buildSearchQuery(labels: readonly string[]): string;
   shouldIncludeIssue(item: Record<string, unknown>): boolean;
@@ -220,13 +223,21 @@ describe('GitHubService internals', () => {
           },
         },
       },
-    };
+      paginate: {
+        iterator: async function* () {
+          searchCalls += 1;
+          yield {
+            data: [],
+          };
+        },
+      },
+    } as unknown as GitHubServiceInternals['octokit'];
 
     const cached = await service.fetchTrendingIssues();
     const refreshed = await service.fetchTrendingIssues({ refresh: true });
 
     expect(cached).toHaveLength(1);
     expect(refreshed).toEqual([]);
-    expect(searchCalls).toBe(2);
+    expect(searchCalls).toBe(4);
   });
 });

@@ -11,15 +11,13 @@
     "build": "bun build --target=bun --outfile=bin/openmeta.js ./src/cli.ts",
     "dev": "bun run ./src/cli.ts",
     "start": "bun run ./src/cli.ts",
-    "typecheck": "bunx tsc --noEmit",
+    "typecheck": "tsgo --noEmit",
     "test": "bun test"
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "@types/crypto-js": "^4.2.2"
-  },
-  "peerDependencies": {
-    "typescript": "^5"
+    "@types/crypto-js": "^4.2.2",
+    "@typescript/native-preview": "^7.0.0-dev"
   },
   "dependencies": {
     "@clack/prompts": "^1.2.0",

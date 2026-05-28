@@ -79,7 +79,7 @@ export class DoctorOrchestrator {
       this.checkDirectory('openmeta-home', 'OpenMeta home', homePath, 'Run "openmeta agent" or create the directory manually with write permissions.'),
       this.checkDirectory('workspace-root', 'Workspace root', getOpenMetaWorkspaceRoot(), 'Run "openmeta agent" after configuration is complete.'),
       this.checkDirectory('artifact-root', 'Artifact root', getOpenMetaArtifactRoot(), 'Run "openmeta agent" after configuration is complete.'),
-      this.checkCommand('runtime-bun', 'Bun runtime', 'bun', ['--version'], 'Install Bun 1.0+ and ensure it is available on PATH.'),
+      this.checkBunRuntime(),
       this.checkCommand('runtime-git', 'Git runtime', 'git', ['--version'], 'Install Git and ensure it is available on PATH.'),
       this.checkGitHubConfig(resolvedConfig),
       this.checkLlmConfig(resolvedConfig),
@@ -212,6 +212,21 @@ export class DoctorOrchestrator {
       summary: `${command} is available.`,
       detail: (result.stdout || result.stderr || '').trim().split(/\r?\n/)[0],
     };
+  }
+
+  private checkBunRuntime(): DoctorCheck {
+    const bunVersion = process.versions.bun;
+    if (bunVersion) {
+      return {
+        id: 'runtime-bun',
+        label: 'Bun runtime',
+        status: 'pass',
+        summary: 'bun is available.',
+        detail: bunVersion,
+      };
+    }
+
+    return this.checkCommand('runtime-bun', 'Bun runtime', 'bun', ['--version'], 'Install Bun 1.0+ and ensure it is available on PATH.');
   }
 
   private checkGitHubConfig(config: AppConfig): DoctorCheck {
