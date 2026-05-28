@@ -183,9 +183,13 @@ export class AgentOrchestrator {
       const linked = await githubService.hasLinkedPR(selectedIssue.repoFullName, selectedIssue.number);
       if (linked.hasPR) {
         logger.info(`Skipping ${selectedIssue.repoFullName}#${selectedIssue.number} - already has linked PR: ${linked.prUrl}`);
+        const contributedKeys = new Set(
+          proofOfWorkService.load().records.map((r) => `${r.repoFullName}#${r.issueNumber}`),
+        );
         const candidates = rankedIssues.filter(
           (i) => i.opportunity.overallScore >= config.automation.minMatchScore &&
-            `${i.repoFullName}#${i.number}` !== `${selectedIssue!.repoFullName}#${selectedIssue!.number}`
+            `${i.repoFullName}#${i.number}` !== `${selectedIssue!.repoFullName}#${selectedIssue!.number}` &&
+            !contributedKeys.has(`${i.repoFullName}#${i.number}`)
         );
         selectedIssue = undefined;
         for (const candidate of candidates) {

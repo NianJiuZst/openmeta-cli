@@ -53,7 +53,7 @@ const WATCHED_REPOS: readonly string[] = [
 ] as const;
 
 const SEARCH_RESULTS_PER_PAGE = 30;
-const SEARCH_CACHE_TTL_MS = 10 * 60 * 1000;
+const SEARCH_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_PAGINATION_RETRIES = 3;
 const RATE_LIMIT_RETRY_BASE_DELAY_MS = 1000;
 
@@ -574,18 +574,23 @@ export class GitHubService {
 
   private loadCachedIssues(): GitHubIssue[] | null {
     const cachePath = this.getCachePath();
+    logger.debug(`[CACHE] Checking cache at: ${cachePath}`);
     if (!existsSync(cachePath)) {
+      logger.debug('[CACHE] Cache file does not exist');
       return null;
     }
 
     try {
       const payload = JSON.parse(readFileSync(cachePath, 'utf-8')) as Partial<IssueCachePayload>;
       if (!payload.fetchedAt || !Array.isArray(payload.issues)) {
+        logger.debug('[CACHE] Invalid cache format');
         return null;
       }
 
       const ageMs = Date.now() - new Date(payload.fetchedAt).getTime();
+      logger.debug(`[CACHE] Age: ${(ageMs/60000).toFixed(0)}min, TTL: ${(SEARCH_CACHE_TTL_MS/60000).toFixed(0)}min, issues: ${payload.issues.length}`);
       if (ageMs > SEARCH_CACHE_TTL_MS) {
+        logger.debug('[CACHE] Cache expired');
         return null;
       }
 

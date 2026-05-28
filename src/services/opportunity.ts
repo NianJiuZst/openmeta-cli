@@ -75,14 +75,14 @@ function computeOnboardingClarity(issue: MatchedIssue): number {
 }
 
 function computeMergePotential(issue: MatchedIssue, freshnessScore: number, riskPenalty: number): number {
-  const starSignal = Math.min(28, Math.log10(issue.repoStars + 10) * 18);
+  const starSignal = Math.min(35, Math.log10(issue.repoStars + 1) * 22);
   const labelSignal = issue.labels.length > 0 ? 10 : 0;
 
-  return clampScore(35 + starSignal + labelSignal + freshnessScore * 0.25 - riskPenalty * 0.55);
+  return clampScore(30 + starSignal + labelSignal + freshnessScore * 0.15 - riskPenalty * 0.55);
 }
 
 function computeImpactScore(issue: MatchedIssue): number {
-  return clampScore(20 + Math.log10(issue.repoStars + 10) * 28);
+  return clampScore(10 + Math.log10(issue.repoStars + 1) * 38);
 }
 
 function summarizeOpportunity(opportunity: OpportunityAnalysis): string {
@@ -154,10 +154,10 @@ export class OpportunityService {
         const mergePotential = computeMergePotential(issue, freshness, riskPenalty);
         const impact = computeImpactScore(issue);
         const opportunityScore = clampScore(
-          freshness * 0.25 +
-          onboardingClarity * 0.25 +
-          mergePotential * 0.30 +
-          impact * 0.20 -
+          freshness * 0.15 +
+          onboardingClarity * 0.20 +
+          mergePotential * 0.35 +
+          impact * 0.30 -
           riskPenalty * 0.35,
         );
         const overallScore = clampScore(issue.matchScore * 0.45 + opportunityScore * 0.55);
