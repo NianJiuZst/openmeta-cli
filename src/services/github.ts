@@ -5,7 +5,6 @@ import { join } from 'path';
 import type { GitHubIssue } from '../types/index.js';
 import { ensureDirectory, getOpenMetaStateDir } from '../infra/index.js';
 import { logger } from '../infra/logger.js';
-import { configService } from '../infra/config.js';
 import { proofOfWorkService } from './proof-of-work.js';
 
 const FILTER_LABEL_GROUPS = [
@@ -13,31 +12,6 @@ const FILTER_LABEL_GROUPS = [
   ['help wanted', 'help-wanted', 'up-for-grabs', 'starter'],
   ['low-hanging-fruit', 'easy', 'contribution-welcome'],
 ] as const;
-
-const TECH_TO_GITHUB_LANGUAGES: Record<string, string> = {
-  'node.js': 'JavaScript',
-  'javascript': 'JavaScript',
-  'typescript': 'TypeScript',
-  'python': 'Python',
-  'fastapi': 'Python',
-  'go': 'Go',
-  'golang': 'Go',
-  'java': 'Java',
-  'spring boot': 'Java',
-  'rust': 'Rust',
-  'c++': 'C++',
-  'c#': 'C#',
-  'ruby': 'Ruby',
-  'php': 'PHP',
-  'swift': 'Swift',
-  'kotlin': 'Kotlin',
-  'scala': 'Scala',
-  'elixir': 'Elixir',
-  'haskell': 'Haskell',
-  'lua': 'Lua',
-  'r': 'R',
-  'dart': 'Dart',
-};
 const ACTION_BLOCKING_LABELS = [
   'blocked',
   'duplicate',
@@ -278,39 +252,9 @@ export class GitHubService {
     return this.username;
   }
 
-  private async getUserLanguages(): Promise<string[]> {
-    try {
-      const config = await configService.load();
-      const techStack = config.userProfile?.techStack ?? [];
-      const languages = new Set<string>();
-      for (const tech of techStack) {
-        const lang = TECH_TO_GITHUB_LANGUAGES[tech.toLowerCase()];
-        if (lang) {
-          languages.add(lang);
-        }
-      }
-      return [...languages];
-    } catch {
-      return [];
-    }
-  }
-
   private buildSearchQuery(labels: readonly string[]): string {
     const joinedLabels = labels.map((label) => `label:"${label}"`).join(' OR ');
     return `(${joinedLabels}) archived:false is:issue is:open no:assignee`;
-  }
-
-  private async buildSearchQueries(labels: readonly string[]): Promise<string[]> {
-    const joinedLabels = labels.map((label) => `label:"${label}"`).join(' OR ');
-    const base = `(${joinedLabels}) archived:false is:issue is:open no:assignee`;
-    const languages = await this.getUserLanguages();
-
-    if (languages.length === 0) {
-      return [base];
-    }
-
-    // Return one query per language to diversify results across tech stack
-    return languages.map((lang) => `${base} language:"${lang}"`);
   }
 
   private shouldIncludeIssue(item: SearchIssueItem): boolean {
@@ -340,7 +284,7 @@ export class GitHubService {
     }
 
     try {
-      const [owner, repo] = repoFullName.split('/');
+      const [owner, repo] = repoFullName.split('/') as [string, string];
       const { data: timeline } = await this.octokit.rest.issues.listEventsForTimeline({
         owner,
         repo,

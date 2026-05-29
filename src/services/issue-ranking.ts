@@ -125,10 +125,11 @@ export class IssueRankingService {
     );
 
     if (anyFresh.length > 0) {
+      const best = anyFresh[0]!;
       logger.warn(
-        `All issues above threshold ${minOverallScore} have already been contributed to. Falling back to best uncontributed issue (${anyFresh[0].repoFullName}#${anyFresh[0].number}, score ${anyFresh[0].opportunity.overallScore}).`,
+        `All issues above threshold ${minOverallScore} have already been contributed to. Falling back to best uncontributed issue (${best.repoFullName}#${best.number}, score ${best.opportunity.overallScore}).`,
       );
-      return anyFresh[0];
+      return best;
     }
 
     logger.warn(
