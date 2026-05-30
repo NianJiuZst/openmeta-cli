@@ -29,6 +29,7 @@ const WATCHED_REPOS: readonly string[] = [
 const SEARCH_RESULTS_PER_PAGE = 30;
 const SEARCH_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_PAGINATION_RETRIES = 3;
+const MAX_SEARCH_PAGES = 13; // Cap pagination depth: 13 pages × 2 label groups = 26 of 30 search API requests/min
 const RATE_LIMIT_RETRY_BASE_DELAY_MS = 1000;
 
 type SearchIssueItem =
@@ -447,10 +448,12 @@ export class GitHubService {
       throw new Error('GitHub service not initialized');
     }
 
+    const items: SearchIssueItem[] = [];
     let attempt = 0;
+    let pagesFetched = 0;
+
     while (attempt < MAX_PAGINATION_RETRIES) {
       try {
-        const items: SearchIssueItem[] = [];
         for await (const response of this.octokit.paginate.iterator(
           this.octokit.rest.search.issuesAndPullRequests,
           {
@@ -467,6 +470,14 @@ export class GitHubService {
             : [];
           
           items.push(...pageItems);
+          pagesFetched++;
+
+          // Cap pagination depth to stay within GitHub Search API rate limits.
+          // 13 pages × 2 label groups = 26 of 30 requests/min leaves a safety margin.
+          if (pagesFetched >= MAX_SEARCH_PAGES) {
+            logger.warn(`Reached page cap (${MAX_SEARCH_PAGES}) to avoid rate limiting. Returning ${items.length} results.`);
+            return items;
+          }
         }
         return items;
       } catch (error) {
@@ -474,25 +485,39 @@ export class GitHubService {
         const err = error as { status?: number; headers?: Record<string, string> };
         const isRateLimit = err.status === 403 || err.status === 429;
 
-        if (isRateLimit && attempt < MAX_PAGINATION_RETRIES) {
-          const resetHeader = err.headers?.['x-ratelimit-reset'];
-          let delayMs = RATE_LIMIT_RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1);
-
-          if (resetHeader) {
-            const resetTime = parseInt(resetHeader, 10) * 1000;
-            const waitMs = resetTime - Date.now();
-            if (waitMs > 0 && waitMs < 60_000) {
-              delayMs = Math.min(waitMs + 500, 60_000);
-            }
+        if (isRateLimit) {
+          // Graceful degradation: return already-fetched items instead of discarding them
+          if (items.length > 0) {
+            logger.warn(`Rate limited during pagination (attempt ${attempt}/${MAX_PAGINATION_RETRIES}) after ${pagesFetched} pages. Returning ${items.length} partial results.`);
+            return items;
           }
 
-          logger.warn(`Rate limited during pagination (attempt ${attempt}/${MAX_PAGINATION_RETRIES}). Retrying in ${Math.round(delayMs / 1000)}s...`);
-          await this.delay(delayMs);
-          continue;
+          if (attempt < MAX_PAGINATION_RETRIES) {
+            const resetHeader = err.headers?.['x-ratelimit-reset'];
+            let delayMs = RATE_LIMIT_RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1);
+
+            if (resetHeader) {
+              const resetTime = parseInt(resetHeader, 10) * 1000;
+              const waitMs = resetTime - Date.now();
+              if (waitMs > 0 && waitMs < 60_000) {
+                delayMs = Math.min(waitMs + 500, 60_000);
+              }
+            }
+
+            logger.warn(`Rate limited during pagination (attempt ${attempt}/${MAX_PAGINATION_RETRIES}). Retrying in ${Math.round(delayMs / 1000)}s...`);
+            await this.delay(delayMs);
+            continue;
+          }
         }
 
         throw error;
       }
+    }
+
+    // If we exhausted retries but have partial results, return them
+    if (items.length > 0) {
+      logger.warn(`Pagination exhausted after ${MAX_PAGINATION_RETRIES} attempts. Returning ${items.length} partial results.`);
+      return items;
     }
 
     throw new Error(`Pagination exhausted after ${MAX_PAGINATION_RETRIES} attempts`);
