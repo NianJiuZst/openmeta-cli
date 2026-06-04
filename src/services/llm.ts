@@ -3,11 +3,9 @@ import { z } from 'zod';
 import {
   ImplementationDraftEnvelopeSchema,
   IssueMatchListEnvelopeSchema,
-  MultiApproachPatchEnvelopeSchema,
   PatchDraftEnvelopeSchema,
   RepositorySuggestionListEnvelopeSchema,
   type StructuredOutputResult,
-  type MultiApproachPatch,
   type PatchDraft,
   PullRequestDraftEnvelopeSchema,
   type PullRequestDraft,
@@ -44,7 +42,6 @@ import {
   DAILY_DIARY_GENERATE_PROMPT,
   PATCH_DRAFT_PROMPT,
   PATCH_DRAFT_REPAIR_PROMPT,
-  MULTI_APPROACH_PATCH_PROMPT,
   PR_DRAFT_PROMPT,
   REPOSITORY_ANALYSIS_PROMPT,
   REPOSITORY_ANALYSIS_REPAIR_PROMPT,
@@ -207,26 +204,6 @@ Repo Stars: ${i.repoStars}`
       parser: this.parsePatchDraft.bind(this),
       repairPrompt: PATCH_DRAFT_REPAIR_PROMPT,
     });
-  }
-
-  async generateMultiApproachPatch(
-    issue: RankedIssue,
-    workspace: RepoWorkspaceContext,
-    memory: RepoMemory,
-  ): Promise<StructuredOutputResult<'multi_approach_patch', MultiApproachPatch>> {
-    const repoContext = [
-      `Workspace Path: ${workspace.workspacePath}`,
-      `Default Branch: ${workspace.defaultBranch}`,
-      `Candidate Files: ${workspace.candidateFiles.join(', ') || 'none'}`,
-      'Snippets:',
-      ...workspace.snippets.map((s) => `FILE: ${s.path}\n${s.content}`),
-    ].join('\n\n');
-    const prompt = fillPrompt(MULTI_APPROACH_PATCH_PROMPT, {
-      issueContext: this.formatRankedIssue(issue),
-      repoContext,
-      repoMemory: this.formatRepoMemory(memory),
-    });
-    return this.generateStructuredOutput({ prompt, parser: this.parseMultiApproachPatch.bind(this) });
   }
 
   async analyzeRepository(
@@ -515,12 +492,6 @@ Repo Stars: ${i.repoStars}`
 
   private parsePatchDraft(content: string): StructuredOutputResult<'patch_draft', PatchDraft> {
     return this.parseStructuredJson(content, PatchDraftEnvelopeSchema);
-  }
-
-  private parseMultiApproachPatch(
-    content: string,
-  ): StructuredOutputResult<'multi_approach_patch', MultiApproachPatch> {
-    return this.parseStructuredJson(content, MultiApproachPatchEnvelopeSchema);
   }
 
   private parsePullRequestDraft(

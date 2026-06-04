@@ -3,7 +3,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import { Octokit } from '@octokit/rest';
 import { simpleGit, type SimpleGit } from 'simple-git';
-import type { PatchDraft, PullRequestDraft, StructuredOutputStatus } from '../contracts/index.js';
+import type { PatchDraft, PullRequestDraft } from '../contracts/index.js';
 import type {
   AppConfig,
   ContributionAgentResult,
@@ -271,69 +271,31 @@ export class AgentOrchestrator {
     completedStages.add('prepare');
     this.showWorkspaceSummary(workspace, memory);
 
-    // ── Draft: 非 headless 模式生成多方案供用户选择 ──
-    let patchDraft: PatchDraft;
-    let patchDraftStatus: StructuredOutputStatus = 'success';
-
-    if (!headless) {
-      this.renderAgentStage('draft', completedStages, 'Generating multiple fix approaches and letting you choose.');
-      const multiResult = await ui.task({
-        title: 'Generating fix approaches',
-        doneMessage: 'Approaches generated',
-        failedMessage: 'Approach generation failed',
-        tone: 'info',
-      }, async () => llmService.generateMultiApproachPatch(selectedIssue, workspace, memory));
-
-      if (multiResult.status === 'success' && multiResult.data.approaches.length >= 2) {
-        const approaches = multiResult.data.approaches;
-        const choice = await selectPrompt({
-          message: `Found ${approaches.length} approaches. Which one do you prefer?`,
-          choices: approaches.map((a, i) => ({
-            name: `${i === 0 ? '⭐ ' : ''}${a.name} — ${a.description}`,
-            value: a,
-          })),
-        });
-        patchDraft = choice.patchDraft;
-        logger.info(`User selected approach: ${choice.name}`);
-      } else {
-        logger.warn('Multi-approach yielded insufficient approaches. Falling back to single approach.');
-        const fallback = await ui.task({
-          title: 'Generating single patch strategy',
-          doneMessage: 'Patch strategy generated',
-          failedMessage: 'Patch strategy generation failed',
-          tone: 'info',
-        }, async () => llmService.generatePatchDraft(selectedIssue, workspace, memory));
-        patchDraft = fallback.data;
-        patchDraftStatus = fallback.status;
-      }
-    } else {
-      this.renderAgentStage('draft', completedStages, 'Drafting patch strategy and turning it into concrete file changes.');
-      const result = await ui.task({
-        title: 'Generating patch strategy',
-        doneMessage: 'Patch strategy generated',
-        failedMessage: 'Patch strategy generation failed',
-        tone: 'info',
-      }, async () => llmService.generateMultiApproachPatch(selectedIssue, workspace, memory));
-      if (result.status === 'success' && result.data.approaches.length > 0) {
-        patchDraft = result.data.approaches[0]!.patchDraft;
-      } else {
-        const fallback = await llmService.generatePatchDraft(selectedIssue, workspace, memory);
-        patchDraft = fallback.data;
-        patchDraftStatus = fallback.status;
-      }
-    }
-
-    if (patchDraftStatus !== 'success') {
+    this.renderAgentStage('draft', completedStages, 'Drafting patch strategy and turning it into concrete file changes.');
+    const patchDraftResult = await ui.task({
+      title: 'Generating patch strategy',
+      doneMessage: 'Patch strategy generated',
+      failedMessage: 'Patch strategy generation failed',
+      tone: 'info',
+    }, async () => llmService.generatePatchDraft(selectedIssue, workspace, memory));
+    const patchDraft = patchDraftResult.data;
+    if (patchDraftResult.status !== 'success') {
       this.showStructuredReviewNotice({
         title: 'Patch strategy requires review',
         subtitle: 'OpenMeta marked the generated patch plan as review-required, so this run will preserve artifacts but skip concrete code edits.',
-        lines: [`Goal: ${patchDraft.goal}`],
+        lines: [
+          `Goal: ${patchDraft.goal}`,
+        ],
       });
     }
     const implementationWorkspace = this.buildImplementationWorkspace(workspace, patchDraft);
-    const implementation = patchDraftStatus === 'success'
+    const implementation = patchDraftResult.status === 'success'
       ? await this.generateConcretePatch(selectedIssue, implementationWorkspace, patchDraft, runChecks, draftOnly)
-      : { changedFiles: [], validationResults: implementationWorkspace.testResults, reviewRequired: true };
+      : {
+        changedFiles: [],
+        validationResults: implementationWorkspace.testResults,
+        reviewRequired: true,
+      };
     completedStages.add('draft');
     const workspaceForArtifacts: RepoWorkspaceContext = {
       ...implementationWorkspace,
@@ -366,7 +328,7 @@ export class AgentOrchestrator {
 
     const contributionPullRequest = await this.submitContributionPullRequestIfPossible({
       config,
-      allowRealPr: patchDraftStatus === 'success' && prDraftResult.status === 'success',
+      allowRealPr: patchDraftResult.status === 'success' && prDraftResult.status === 'success',
       headless,
       issue: selectedIssue,
       prDraft,
@@ -457,7 +419,7 @@ export class AgentOrchestrator {
     });
 
     const reviewRequired =
-      patchDraftStatus !== 'success'
+      patchDraftResult.status !== 'success'
       || implementation.reviewRequired
       || prDraftResult.status !== 'success';
     const finalProofRecord = {
