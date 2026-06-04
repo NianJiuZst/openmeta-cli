@@ -117,8 +117,19 @@ export const RepositorySuggestionListSchema = z.object({
   }),
 });
 
+export const PatchApproachSchema = z.object({
+  name: nonEmptyTrimmedString,
+  description: nonEmptyTrimmedString,
+  tradeoffs: z.array(nonEmptyTrimmedString).default([]),
+  patchDraft: PatchDraftSchema,
+});
+export const MultiApproachPatchSchema = z.object({
+  approaches: z.array(PatchApproachSchema).min(2).max(4),
+});
+
 export const IssueMatchListEnvelopeSchema = createStructuredOutputEnvelopeSchema('issue_match_list', IssueMatchListSchema);
 export const PatchDraftEnvelopeSchema = createStructuredOutputEnvelopeSchema('patch_draft', PatchDraftSchema);
+export const MultiApproachPatchEnvelopeSchema = createStructuredOutputEnvelopeSchema('multi_approach_patch', MultiApproachPatchSchema);
 export const ImplementationDraftEnvelopeSchema = createStructuredOutputEnvelopeSchema('implementation_draft', ImplementationDraftSchema);
 export const PullRequestDraftEnvelopeSchema = createStructuredOutputEnvelopeSchema('pull_request_draft', PullRequestDraftSchema);
 export const RepositorySuggestionListEnvelopeSchema = createStructuredOutputEnvelopeSchema('repository_suggestion_list', RepositorySuggestionListSchema);
@@ -140,8 +151,11 @@ export interface StructuredOutputResult<TKind extends string, TData> {
   status: StructuredOutputStatus;
   data: TData;
 }
+export type PatchApproach = z.infer<typeof PatchApproachSchema>;
+export type MultiApproachPatch = z.infer<typeof MultiApproachPatchSchema>;
 export type IssueMatchListEnvelope = z.infer<typeof IssueMatchListEnvelopeSchema>;
 export type PatchDraftEnvelope = z.infer<typeof PatchDraftEnvelopeSchema>;
+export type MultiApproachPatchEnvelope = z.infer<typeof MultiApproachPatchEnvelopeSchema>;
 export type ImplementationDraftEnvelope = z.infer<typeof ImplementationDraftEnvelopeSchema>;
 export type PullRequestDraftEnvelope = z.infer<typeof PullRequestDraftEnvelopeSchema>;
 export type RepositorySuggestionListEnvelope = z.infer<typeof RepositorySuggestionListEnvelopeSchema>;

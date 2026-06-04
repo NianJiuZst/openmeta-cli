@@ -1,9 +1,9 @@
-import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import { Octokit } from '@octokit/rest';
 import { simpleGit, type SimpleGit } from 'simple-git';
-import type { PatchDraft, PullRequestDraft } from '../contracts/index.js';
+import type { PatchDraft, PullRequestDraft, StructuredOutputStatus } from '../contracts/index.js';
 import type {
   AppConfig,
   ContributionAgentResult,
@@ -80,6 +80,14 @@ interface ConcretePatchResult {
 
 type AgentStageId = 'scout' | 'select' | 'prepare' | 'draft' | 'validate' | 'pr' | 'publish';
 const ARTIFACT_PUBLISH_BRANCH = 'openmeta-artifacts';
+const CHECKPOINT_FILE = 'agent-checkpoint.json';
+
+interface AgentCheckpoint {
+  rankedIssues: RankedIssue[];
+  selectedIssue?: RankedIssue;
+  completedStages: AgentStageId[];
+  savedAt: string;
+}
 
 const AGENT_STAGES: Array<{ id: AgentStageId; label: string; description: string }> = [
   {
@@ -162,23 +170,44 @@ export class AgentOrchestrator {
       await this.confirmManualHeadlessRun(config);
     }
 
-    this.renderAgentStage('scout', completedStages, issueTarget
-      ? `Verifying provider access and loading ${issueTarget.repoFullName}#${issueTarget.issueNumber}.`
-      : 'Verifying provider access and loading ranked opportunities.');
-    await this.initializeClients(config);
+    // ── 断点恢复：如果有 checkpoint 且不是 headless/refresh，提示用户 ──
+    if (!issueTarget && !headless && !refresh && this.loadCheckpoint()) {
+      const checkpoint = this.loadCheckpoint()!;
+      const resumeChoice = await selectPrompt({
+        message: `Found a checkpoint from ${checkpoint.savedAt}. Resume from where you left off?`,
+        choices: [
+          { name: 'Resume (skip scout)', value: 'resume' as const },
+          { name: 'Start fresh', value: 'fresh' as const },
+        ],
+      });
+      if (resumeChoice === 'resume') {
+        for (const stage of checkpoint.completedStages) completedStages.add(stage);
+        logger.info(`Resuming from checkpoint — ${completedStages.size} stage(s) already completed`);
+      }
+    }
 
-    const rankedIssues = await ui.task({
-      title: issueTarget ? 'Loading target issue' : 'Ranking contribution opportunities',
-      doneMessage: 'Opportunity ranking complete',
-      failedMessage: 'Opportunity ranking failed',
-      tone: 'info',
-    }, async (task) => issueTarget
-      ? issueRankingService.loadTargetIssue(config, issueTarget)
+    // ── Scout：搜索 issue（checkpoint 恢复时跳过） ──
+    let rankedIssues: RankedIssue[];
+    await this.initializeClients(config);
+    if (completedStages.has('scout')) {
+      rankedIssues = this.loadCheckpoint()!.rankedIssues;
+    } else {
+      this.renderAgentStage('scout', completedStages, issueTarget
+        ? `Verifying provider access and loading ${issueTarget.repoFullName}#${issueTarget.issueNumber}.`
+        : 'Verifying provider access and loading ranked opportunities.');
+      rankedIssues = await ui.task({
+        title: issueTarget ? 'Loading target issue' : 'Ranking contribution opportunities',
+        doneMessage: 'Opportunity ranking complete',
+        failedMessage: 'Opportunity ranking failed',
+        tone: 'info',
+      }, async (task) => issueTarget
+        ? issueRankingService.loadTargetIssue(config, issueTarget)
       : issueRankingService.loadRankedIssues(config, {
         refresh,
         repoFullName,
         onStatus: (message) => task.setMessage(message),
       }));
+    }
     if (rankedIssues.length === 0) {
       ui.emptyState(
         'OpenMeta Agent',
@@ -190,30 +219,39 @@ export class AgentOrchestrator {
       return;
     }
     completedStages.add('scout');
+    this.saveCheckpoint({ rankedIssues, completedStages: [...completedStages] });
 
-    this.renderAgentStage('select', completedStages, issueTarget
-      ? 'Using the explicitly targeted issue as the contribution target.'
-      : 'Review the top ranked issues and choose the next contribution target.');
-    if (!issueTarget) {
-      this.renderOpportunityList('Top ranked opportunities', rankedIssues.slice(0, 5));
+    // ── Select：选择目标（checkpoint 恢复时跳过） ──
+    let selectedIssue: RankedIssue | undefined;
+    if (completedStages.has('select')) {
+      selectedIssue = this.loadCheckpoint()?.selectedIssue;
     }
-    const selectedIssue = issueTarget
-      ? rankedIssues[0]
-      : headless
-        ? issueRankingService.selectIssueForAutomation(rankedIssues, config.automation.minMatchScore)
-        : await this.promptForIssue(rankedIssues);
-
     if (!selectedIssue) {
-      ui.emptyState(
-        'OpenMeta Agent',
-        issueTarget ? 'Target issue could not be selected' : 'No issue met the automation threshold',
-        issueTarget
-          ? 'OpenMeta could not select the specified target issue after scoring.'
-          : `Top opportunities were below ${config.automation.minMatchScore}/100. Lower the threshold or widen your profile.`,
-      );
-      return;
+      this.renderAgentStage('select', completedStages, issueTarget
+        ? 'Using the explicitly targeted issue as the contribution target.'
+        : 'Review the top ranked issues and choose the next contribution target.');
+      if (!issueTarget) {
+        this.renderOpportunityList('Top ranked opportunities', rankedIssues.slice(0, 5));
+      }
+      selectedIssue = issueTarget
+        ? rankedIssues[0]
+        : headless
+          ? issueRankingService.selectIssueForAutomation(rankedIssues, config.automation.minMatchScore)
+          : await this.promptForIssue(rankedIssues);
+
+      if (!selectedIssue) {
+        ui.emptyState(
+          'OpenMeta Agent',
+          issueTarget ? 'Target issue could not be selected' : 'No issue met the automation threshold',
+          issueTarget
+            ? 'OpenMeta could not select the specified target issue after scoring.'
+            : `Top opportunities were below ${config.automation.minMatchScore}/100. Lower the threshold or widen your profile.`,
+        );
+        return;
+      }
+      completedStages.add('select');
+      this.saveCheckpoint({ rankedIssues, selectedIssue, completedStages: [...completedStages] });
     }
-    completedStages.add('select');
     this.showSelectedOpportunity(selectedIssue, headless);
 
     this.renderAgentStage('prepare', completedStages, `Cloning and inspecting ${selectedIssue.repoFullName}.`);
@@ -233,31 +271,69 @@ export class AgentOrchestrator {
     completedStages.add('prepare');
     this.showWorkspaceSummary(workspace, memory);
 
-    this.renderAgentStage('draft', completedStages, 'Drafting patch strategy and turning it into concrete file changes.');
-    const patchDraftResult = await ui.task({
-      title: 'Generating patch strategy',
-      doneMessage: 'Patch strategy generated',
-      failedMessage: 'Patch strategy generation failed',
-      tone: 'info',
-    }, async () => llmService.generatePatchDraft(selectedIssue, workspace, memory));
-    const patchDraft = patchDraftResult.data;
-    if (patchDraftResult.status !== 'success') {
+    // ── Draft: 非 headless 模式生成多方案供用户选择 ──
+    let patchDraft: PatchDraft;
+    let patchDraftStatus: StructuredOutputStatus = 'success';
+
+    if (!headless) {
+      this.renderAgentStage('draft', completedStages, 'Generating multiple fix approaches and letting you choose.');
+      const multiResult = await ui.task({
+        title: 'Generating fix approaches',
+        doneMessage: 'Approaches generated',
+        failedMessage: 'Approach generation failed',
+        tone: 'info',
+      }, async () => llmService.generateMultiApproachPatch(selectedIssue, workspace, memory));
+
+      if (multiResult.status === 'success' && multiResult.data.approaches.length >= 2) {
+        const approaches = multiResult.data.approaches;
+        const choice = await selectPrompt({
+          message: `Found ${approaches.length} approaches. Which one do you prefer?`,
+          choices: approaches.map((a, i) => ({
+            name: `${i === 0 ? '⭐ ' : ''}${a.name} — ${a.description}`,
+            value: a,
+          })),
+        });
+        patchDraft = choice.patchDraft;
+        logger.info(`User selected approach: ${choice.name}`);
+      } else {
+        logger.warn('Multi-approach yielded insufficient approaches. Falling back to single approach.');
+        const fallback = await ui.task({
+          title: 'Generating single patch strategy',
+          doneMessage: 'Patch strategy generated',
+          failedMessage: 'Patch strategy generation failed',
+          tone: 'info',
+        }, async () => llmService.generatePatchDraft(selectedIssue, workspace, memory));
+        patchDraft = fallback.data;
+        patchDraftStatus = fallback.status;
+      }
+    } else {
+      this.renderAgentStage('draft', completedStages, 'Drafting patch strategy and turning it into concrete file changes.');
+      const result = await ui.task({
+        title: 'Generating patch strategy',
+        doneMessage: 'Patch strategy generated',
+        failedMessage: 'Patch strategy generation failed',
+        tone: 'info',
+      }, async () => llmService.generateMultiApproachPatch(selectedIssue, workspace, memory));
+      if (result.status === 'success' && result.data.approaches.length > 0) {
+        patchDraft = result.data.approaches[0]!.patchDraft;
+      } else {
+        const fallback = await llmService.generatePatchDraft(selectedIssue, workspace, memory);
+        patchDraft = fallback.data;
+        patchDraftStatus = fallback.status;
+      }
+    }
+
+    if (patchDraftStatus !== 'success') {
       this.showStructuredReviewNotice({
         title: 'Patch strategy requires review',
         subtitle: 'OpenMeta marked the generated patch plan as review-required, so this run will preserve artifacts but skip concrete code edits.',
-        lines: [
-          `Goal: ${patchDraft.goal}`,
-        ],
+        lines: [`Goal: ${patchDraft.goal}`],
       });
     }
     const implementationWorkspace = this.buildImplementationWorkspace(workspace, patchDraft);
-    const implementation = patchDraftResult.status === 'success'
+    const implementation = patchDraftStatus === 'success'
       ? await this.generateConcretePatch(selectedIssue, implementationWorkspace, patchDraft, runChecks, draftOnly)
-      : {
-        changedFiles: [],
-        validationResults: implementationWorkspace.testResults,
-        reviewRequired: true,
-      };
+      : { changedFiles: [], validationResults: implementationWorkspace.testResults, reviewRequired: true };
     completedStages.add('draft');
     const workspaceForArtifacts: RepoWorkspaceContext = {
       ...implementationWorkspace,
@@ -290,7 +366,7 @@ export class AgentOrchestrator {
 
     const contributionPullRequest = await this.submitContributionPullRequestIfPossible({
       config,
-      allowRealPr: patchDraftResult.status === 'success' && prDraftResult.status === 'success',
+      allowRealPr: patchDraftStatus === 'success' && prDraftResult.status === 'success',
       headless,
       issue: selectedIssue,
       prDraft,
@@ -381,7 +457,7 @@ export class AgentOrchestrator {
     });
 
     const reviewRequired =
-      patchDraftResult.status !== 'success'
+      patchDraftStatus !== 'success'
       || implementation.reviewRequired
       || prDraftResult.status !== 'success';
     const finalProofRecord = {
@@ -409,6 +485,7 @@ export class AgentOrchestrator {
       proofMarkdown: finalProofMarkdown,
     });
     completedStages.add('publish');
+    this.clearCheckpoint();
 
     this.showResult({
       issue: selectedIssue,
@@ -1841,6 +1918,38 @@ export class AgentOrchestrator {
       await git.commit('chore: initialize repository', { '--allow-empty': null });
       await git.raw(['push', '--set-upstream', 'origin', defaultBranch]);
     }
+  }
+
+  // ── Checkpoint 断点恢复 ──
+  private getCheckpointPath(): string {
+    return join(ensureDirectory(join(homedir(), '.openmeta', 'state')), CHECKPOINT_FILE);
+  }
+
+  private loadCheckpoint(): AgentCheckpoint | null {
+    try {
+      const path = this.getCheckpointPath();
+      if (!existsSync(path)) return null;
+      const data = JSON.parse(readFileSync(path, 'utf-8'));
+      if (Date.now() - new Date(data.savedAt).getTime() > 60 * 60 * 1000) {
+        try { unlinkSync(path); } catch { /* ok */ }
+        return null;
+      }
+      return data as AgentCheckpoint;
+    } catch { return null; }
+  }
+
+  private saveCheckpoint(data: { rankedIssues: RankedIssue[]; selectedIssue?: RankedIssue; completedStages: AgentStageId[] }): void {
+    try {
+      const checkpoint: AgentCheckpoint = { ...data, savedAt: new Date().toISOString() };
+      writeFileSync(this.getCheckpointPath(), JSON.stringify(checkpoint, null, 2), 'utf-8');
+    } catch { /* 非致命 */ }
+  }
+
+  private clearCheckpoint(): void {
+    try {
+      const path = this.getCheckpointPath();
+      if (existsSync(path)) unlinkSync(path);
+    } catch { /* ok */ }
   }
 }
 

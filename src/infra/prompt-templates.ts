@@ -131,6 +131,49 @@ Repo Memory:
 {{repoMemory}}
 `;
 
+export const MULTI_APPROACH_PATCH_PROMPT = `You are OpenMeta, an autonomous open source contribution agent.
+
+Generate 2-3 distinct approaches to fix this issue. For each approach, provide a complete patch draft. The approaches should differ meaningfully — for example, minimal vs thorough, or different architectural choices.
+
+Requirements:
+1. Return one valid JSON object only. No markdown. No commentary.
+2. Generate exactly 2-3 approaches with clear trade-offs.
+3. The first approach should be the recommended one.
+4. Each approach must be a complete, actionable patch draft.
+
+Output schema:
+{
+  "version": "1",
+  "kind": "multi_approach_patch",
+  "status": "success",
+  "data": {
+    "approaches": [
+      {
+        "name": "short distinctive label",
+        "description": "one sentence explaining this approach",
+        "tradeoffs": ["pro: ...", "con: ..."],
+        "patchDraft": {
+          "goal": "what this approach should achieve",
+          "targetFiles": [{ "path": "relative/path/to/file", "reason": "why" }],
+          "proposedChanges": [{ "title": "step", "details": "specific details", "files": ["path"] }],
+          "risks": ["concrete risk"],
+          "validationNotes": ["concrete validation note"]
+        }
+      }
+    ]
+  }
+}
+
+Issue:
+{{issueContext}}
+
+Repo Context:
+{{repoContext}}
+
+Repo Memory:
+{{repoMemory}}
+`;
+
 export const PATCH_DRAFT_REPAIR_PROMPT = `You are OpenMeta, an autonomous open source contribution agent.
 
 The previous patch draft response was not parseable or did not match the required schema. Reformat it into strict JSON.
