@@ -102,7 +102,7 @@ type RecordedInteractionEvent =
   | { type: 'start'; event: LLMInteractionEvent }
   | { type: 'chunk'; chunk: string }
   | { type: 'complete'; event: LLMInteractionEvent & { responseChars: number } }
-  | { type: 'parse'; event: LLMInteractionEvent & { kind: string; status: string } }
+  | { type: 'parse'; event: LLMInteractionEvent & { kind: string; status: string; parsed?: unknown } }
   | { type: 'repair'; event: LLMInteractionEvent & { error: string } };
 
 function createRecordingReporter(events: RecordedInteractionEvent[]): LLMInteractionReporter {
@@ -126,6 +126,7 @@ type InitializableService = LLMServiceInternals & {
     stream?: boolean,
     showInteraction?: boolean,
     interactionReporter?: LLMInteractionReporter,
+    interactionMode?: 'summary' | 'raw',
   ): void;
   generateDailyReport(issueAnalysis: string): Promise<string>;
   generatePatchDraft(
@@ -816,7 +817,7 @@ describe('LLMService interaction reporting', () => {
     });
   });
 
-  test('emits streamed chunk events when streaming and interaction output are enabled', async () => {
+  test('emits streamed chunk events when raw interaction mode is enabled', async () => {
     const events: RecordedInteractionEvent[] = [];
     const service = new LLMService() as unknown as InitializableService;
 
@@ -836,6 +837,7 @@ describe('LLMService interaction reporting', () => {
       true,
       true,
       createRecordingReporter(events),
+      'raw',
     );
     service.client = {
       chat: {
@@ -863,6 +865,47 @@ describe('LLMService interaction reporting', () => {
       type: 'complete',
       event: expect.objectContaining({
         responseChars: 5,
+      }),
+    });
+  });
+
+  test('suppresses raw chunk events in summary interaction mode', async () => {
+    const events: RecordedInteractionEvent[] = [];
+    const service = new LLMService() as unknown as InitializableService;
+
+    async function* streamChunks() {
+      yield { choices: [{ delta: { content: '{"version":"1",' } }] };
+      yield { choices: [{ delta: { content: '"kind":"repository_suggestion_list"}' } }] };
+    }
+
+    service.initialize(
+      'sk-test',
+      'https://api.openai.com/v1',
+      'gpt-5.5',
+      {},
+      'openai',
+      'none',
+      true,
+      true,
+      createRecordingReporter(events),
+      'summary',
+    );
+    service.client = {
+      chat: {
+        completions: {
+          create: () => streamChunks(),
+        },
+      },
+    };
+
+    const content = await service.generateDailyReport('issue analysis');
+
+    expect(content).toBe('{"version":"1","kind":"repository_suggestion_list"}');
+    expect(events.filter((event) => event.type === 'chunk')).toEqual([]);
+    expect(events.find((event) => event.type === 'complete')).toEqual({
+      type: 'complete',
+      event: expect.objectContaining({
+        responseChars: 51,
       }),
     });
   });
@@ -950,6 +993,10 @@ describe('LLMService interaction reporting', () => {
           stage: 'patch_draft',
           kind: 'patch_draft',
           status: 'success',
+          parsed: expect.objectContaining({
+            kind: 'patch_draft',
+            status: 'success',
+          }),
         }),
       },
     ]);

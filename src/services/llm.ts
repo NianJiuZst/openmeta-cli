@@ -15,6 +15,7 @@ import type {
   GitHubIssue,
   ImplementationDraft,
   LLMProvider,
+  LLMInteractionMode,
   LLMReasoningEffort,
   MatchedIssue,
   RankedIssue,
@@ -60,6 +61,7 @@ export class LLMService {
   private reasoningEffort: LLMReasoningEffort | undefined;
   private stream = false;
   private showInteraction = false;
+  private interactionMode: LLMInteractionMode = 'summary';
   private interactionReporter: LLMInteractionReporter | undefined;
   private lastValidationError: string | null = null;
 
@@ -73,6 +75,7 @@ export class LLMService {
     stream?: boolean,
     showInteraction?: boolean,
     interactionReporter?: LLMInteractionReporter,
+    interactionMode?: LLMInteractionMode,
   ): void {
     this.client = new OpenAI({
       apiKey,
@@ -88,6 +91,7 @@ export class LLMService {
     this.reasoningEffort = reasoningEffort;
     this.stream = stream === true;
     this.showInteraction = showInteraction === true;
+    this.interactionMode = interactionMode ?? 'summary';
     this.interactionReporter = interactionReporter;
   }
 
@@ -376,7 +380,7 @@ Repo Stars: ${i.repoStars}`
       for await (const chunk of response) {
         const chunkContent = this.extractStreamChunkContent(chunk);
         content += chunkContent;
-        if (chunkContent) {
+        if (chunkContent && this.interactionMode === 'raw') {
           this.emitResponseChunk(chunkContent);
         }
       }
@@ -498,6 +502,7 @@ Repo Stars: ${i.repoStars}`
       ...event,
       kind: metadata.kind,
       status: metadata.status,
+      parsed,
     }));
   }
 

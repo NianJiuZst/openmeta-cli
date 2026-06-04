@@ -47,6 +47,7 @@ function createDefaultConfig(): AppConfig {
       reasoningEffort: DEFAULT_LLM_REASONING_EFFORT,
       stream: false,
       showInteraction: false,
+      interactionMode: 'summary',
       activeProfile: '',
       profiles: {},
     },
@@ -189,6 +190,7 @@ export class ConfigService {
         reasoningEffort: this.normalizeReasoningEffort(config.llm?.reasoningEffort),
         stream: config.llm?.stream === true,
         showInteraction: config.llm?.showInteraction === true,
+        interactionMode: this.normalizeInteractionMode(config.llm?.interactionMode),
         profiles: this.normalizeProviderProfiles(config.llm?.profiles),
       },
       automation: {
@@ -234,6 +236,10 @@ export class ConfigService {
     } catch {
       return DEFAULT_LLM_REASONING_EFFORT;
     }
+  }
+
+  private normalizeInteractionMode(value: unknown): AppConfig['llm']['interactionMode'] {
+    return value === 'raw' ? 'raw' : 'summary';
   }
 
   private normalizeProviderProfiles(

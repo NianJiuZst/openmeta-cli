@@ -93,6 +93,7 @@ describe('stateful services', () => {
     expect(loaded.github.username).toBe('partial-user');
     expect(loaded.llm.modelName).toBe('gpt-4o-mini');
     expect(loaded.llm.showInteraction).toBe(false);
+    expect(loaded.llm.interactionMode).toBe('summary');
     expect(loaded.automation.enabled).toBe(false);
     expect(loaded.automation.scheduleTime).toBe('09:00');
   });
@@ -111,6 +112,7 @@ describe('stateful services', () => {
     const loaded = await service.load();
 
     expect(loaded.llm.showInteraction).toBe(false);
+    expect(loaded.llm.interactionMode).toBe('summary');
   });
 
   test('memory service persists repo memory snapshots', () => {

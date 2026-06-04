@@ -65,6 +65,7 @@ export class ConfigOrchestrator {
       { label: 'Reasoning effort', value: config.llm.reasoningEffort || 'none', tone: 'info' },
       { label: 'Streaming', value: config.llm.stream ? 'yes' : 'no', tone: config.llm.stream ? 'info' : 'muted' },
       { label: 'LLM interaction output', value: config.llm.showInteraction ? 'yes' : 'no', tone: config.llm.showInteraction ? 'info' : 'muted' },
+      { label: 'LLM interaction mode', value: config.llm.interactionMode || 'summary', tone: config.llm.showInteraction ? 'info' : 'muted' },
       { label: 'Extra headers', value: Object.keys(config.llm.apiHeaders || {}).length > 0 ? JSON.stringify(config.llm.apiHeaders) : '(none)', tone: 'info' },
       { label: 'API key', value: ui.maskSecret(config.llm.apiKey), tone: config.llm.apiKey ? 'info' : 'warning' },
       { label: 'Saved profiles', value: String(Object.keys(config.llm.profiles || {}).length), tone: Object.keys(config.llm.profiles || {}).length > 0 ? 'info' : 'muted' },
@@ -100,7 +101,7 @@ export class ConfigOrchestrator {
   async set(key: string, value: string): Promise<void> {
     const config = await configService.get();
     const validPaths = ['userProfile.techStack', 'userProfile.proficiency', 'userProfile.focusAreas',
-                       'github.username', 'github.pat', 'github.targetRepoPath', 'llm.provider', 'llm.apiBaseUrl', 'llm.apiKey', 'llm.modelName', 'llm.reasoningEffort', 'llm.stream', 'llm.showInteraction',
+                       'github.username', 'github.pat', 'github.targetRepoPath', 'llm.provider', 'llm.apiBaseUrl', 'llm.apiKey', 'llm.modelName', 'llm.reasoningEffort', 'llm.stream', 'llm.showInteraction', 'llm.interactionMode',
                        'automation.enabled', 'automation.scheduleTime', 'automation.contentType',
                        'automation.minMatchScore', 'automation.skipIfAlreadyGeneratedToday',
                        'commitTemplate'];
@@ -153,6 +154,8 @@ export class ConfigOrchestrator {
       updated = await configService.update({ llm: { ...config.llm, stream: this.parseBoolean(value, key) } });
     } else if (key === 'llm.showInteraction') {
       updated = await configService.update({ llm: { ...config.llm, showInteraction: this.parseBoolean(value, key) } });
+    } else if (key === 'llm.interactionMode') {
+      updated = await configService.update({ llm: { ...config.llm, interactionMode: this.parseInteractionMode(value) } });
     } else if (key === 'automation.enabled') {
       updated = await configService.update({
         automation: {
@@ -317,6 +320,8 @@ export class ConfigOrchestrator {
         return config.llm.stream ? 'yes' : 'no';
       case 'llm.showInteraction':
         return config.llm.showInteraction ? 'yes' : 'no';
+      case 'llm.interactionMode':
+        return config.llm.interactionMode || 'summary';
       case 'automation.enabled':
         return config.automation.enabled ? 'yes' : 'no';
       case 'automation.scheduleTime':
@@ -332,6 +337,14 @@ export class ConfigOrchestrator {
       default:
         return '(updated)';
     }
+  }
+
+  private parseInteractionMode(value: string): AppConfig['llm']['interactionMode'] {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'summary' || normalized === 'raw') {
+      return normalized;
+    }
+    throw new Error('llm.interactionMode must be "summary" or "raw".');
   }
 }
 

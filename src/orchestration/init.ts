@@ -190,13 +190,14 @@ export class InitOrchestrator {
     let reasoningEffort = config.llm.reasoningEffort || DEFAULT_LLM_REASONING_EFFORT;
     let stream = config.llm.stream === true;
     let showInteraction = config.llm.showInteraction === true;
+    let interactionMode = config.llm.interactionMode || 'summary';
 
     await stepOrSkip(
       'llm',
       !!(apiKey && apiBaseUrl && modelValue),
       'LLM provider is already configured.',
       () => {
-        llmService.initialize(apiKey, apiBaseUrl, modelValue, apiHeaders, providerValue, reasoningEffort, stream, showInteraction, createLLMInteractionReporter(showInteraction));
+        llmService.initialize(apiKey, apiBaseUrl, modelValue, apiHeaders, providerValue, reasoningEffort, stream, showInteraction, createLLMInteractionReporter(showInteraction, interactionMode), interactionMode);
         ui.keyValues('LLM provider connected', [
           { label: 'Provider', value: selectedProvider?.name ?? providerValue, tone: 'success' },
           { label: 'Model', value: modelValue, tone: 'success' },
@@ -243,7 +244,7 @@ export class InitOrchestrator {
           showInteraction = await this.promptLlmInteractionOutput(config.llm.showInteraction);
           apiKey = await this.promptAPIKey();
 
-          llmService.initialize(apiKey, apiBaseUrl, modelValue, apiHeaders, selectedProvider.value as AppConfig['llm']['provider'], reasoningEffort, stream, showInteraction, createLLMInteractionReporter(showInteraction));
+          llmService.initialize(apiKey, apiBaseUrl, modelValue, apiHeaders, selectedProvider.value as AppConfig['llm']['provider'], reasoningEffort, stream, showInteraction, createLLMInteractionReporter(showInteraction, interactionMode), interactionMode);
           llmValid = await this.validateLlmConnection();
 
           if (!llmValid) {
@@ -270,7 +271,7 @@ export class InitOrchestrator {
           }
         }
         completedSteps.add('llm');
-        await commit({ llm: { provider: providerValue as AppConfig['llm']['provider'], apiBaseUrl, apiKey, modelName: modelValue, apiHeaders, reasoningEffort, stream, showInteraction } });
+        await commit({ llm: { provider: providerValue as AppConfig['llm']['provider'], apiBaseUrl, apiKey, modelName: modelValue, apiHeaders, reasoningEffort, stream, showInteraction, interactionMode } });
         ui.keyValues('LLM provider connected', [
           { label: 'Provider', value: selectedProvider!.name, tone: 'success' },
           { label: 'Model', value: modelValue, tone: 'success' },

@@ -87,4 +87,18 @@ describe('ConfigOrchestrator', () => {
       'llm.showInteraction must be a boolean value.',
     );
   });
+
+  test('sets and validates LLM interaction mode from dotted config keys', async () => {
+    const orchestrator = new ConfigOrchestrator();
+
+    await orchestrator.set('llm.interactionMode', 'raw');
+    expect((await configService.get()).llm.interactionMode).toBe('raw');
+
+    await orchestrator.set('llm.interactionMode', 'summary');
+    expect((await configService.get()).llm.interactionMode).toBe('summary');
+
+    await expect(orchestrator.set('llm.interactionMode', 'verbose')).rejects.toThrow(
+      'llm.interactionMode must be "summary" or "raw".',
+    );
+  });
 });

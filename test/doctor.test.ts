@@ -102,13 +102,14 @@ describe('DoctorOrchestrator', () => {
         modelName: 'gpt-5.5',
         stream: true,
         showInteraction: true,
+        interactionMode: 'summary',
       },
     }));
 
     const detail = report.checks.find((check) => check.id === 'llm-config')?.detail;
 
     expect(detail).toContain('streaming yes');
-    expect(detail).toContain('interaction output yes');
+    expect(detail).toContain('interaction output yes (summary)');
   });
 
   test('marks missing credentials as critical failures', async () => {

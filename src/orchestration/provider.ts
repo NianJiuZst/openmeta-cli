@@ -376,7 +376,11 @@ export class ProviderOrchestrator {
     let validationDetail = 'Validation skipped.';
     let tone: 'success' | 'warning' = 'success';
     if (options.validate) {
-      const valid = await this.validateProfile(profile, updated.llm.showInteraction === true);
+      const valid = await this.validateProfile(
+        profile,
+        updated.llm.showInteraction === true,
+        updated.llm.interactionMode || 'summary',
+      );
       validationDetail = valid
         ? 'Provider validation succeeded.'
         : `Provider validation failed: ${llmService.getLastValidationError() || 'unknown reason'}`;
@@ -499,7 +503,11 @@ export class ProviderOrchestrator {
     });
   }
 
-  private async validateProfile(profile: LLMProviderProfile, showInteraction: boolean): Promise<boolean> {
+  private async validateProfile(
+    profile: LLMProviderProfile,
+    showInteraction: boolean,
+    interactionMode: NonNullable<AppConfig['llm']['interactionMode']>,
+  ): Promise<boolean> {
     llmService.initialize(
       profile.apiKey,
       profile.apiBaseUrl,
@@ -509,7 +517,8 @@ export class ProviderOrchestrator {
       profile.reasoningEffort ?? DEFAULT_LLM_REASONING_EFFORT,
       profile.stream === true,
       showInteraction,
-      createLLMInteractionReporter(showInteraction),
+      createLLMInteractionReporter(showInteraction, interactionMode),
+      interactionMode,
     );
 
     return llmService.validateConnection();
