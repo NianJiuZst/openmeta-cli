@@ -1,9 +1,9 @@
-import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import { Octokit } from '@octokit/rest';
 import { simpleGit, type SimpleGit } from 'simple-git';
-import type { PatchDraft, PullRequestDraft } from '../contracts/index.js';
+import type { PatchDraft, PullRequestDraft, StructuredOutputStatus } from '../contracts/index.js';
 import type {
   AppConfig,
   ContributionAgentResult,
@@ -32,6 +32,7 @@ import {
   issueRankingService,
   llmService,
   memoryService,
+  opportunityService,
   proofOfWorkService,
   workspaceService,
 } from '../services/index.js';
@@ -44,6 +45,8 @@ export interface AgentRunOptions {
   draftOnly?: boolean;
   refresh?: boolean;
   dryRun?: boolean;
+  /** 跳过搜索，直接处理指定 issue，格式 owner/repo#123 */
+  issue?: string;
 }
 
 export interface ScoutRunOptions {
@@ -75,6 +78,15 @@ interface ConcretePatchResult {
 
 type AgentStageId = 'scout' | 'select' | 'prepare' | 'draft' | 'validate' | 'pr' | 'publish';
 const ARTIFACT_PUBLISH_BRANCH = 'openmeta-artifacts';
+
+interface AgentCheckpoint {
+  rankedIssues: RankedIssue[];
+  selectedIssue?: RankedIssue;
+  completedStages: AgentStageId[];
+  savedAt: string;
+}
+
+const CHECKPOINT_FILE = 'agent-checkpoint.json';
 
 const AGENT_STAGES: Array<{ id: AgentStageId; label: string; description: string }> = [
   {
@@ -146,44 +158,93 @@ export class AgentOrchestrator {
       await this.confirmManualHeadlessRun(config);
     }
 
-    this.renderAgentStage('scout', completedStages, 'Verifying provider access and loading ranked opportunities.');
     await this.initializeClients(config);
 
-    const rankedIssues = await ui.task({
-      title: 'Ranking contribution opportunities',
-      doneMessage: 'Opportunity ranking complete',
-      failedMessage: 'Opportunity ranking failed',
-      tone: 'info',
-    }, async (task) => issueRankingService.loadRankedIssues(config, {
-      refresh,
-      onStatus: (message) => task.setMessage(message),
-    }));
-    if (rankedIssues.length === 0) {
-      ui.emptyState(
-        'OpenMeta Agent',
-        'No viable issues found',
-        'No issues met the current technical match threshold. Broaden your profile or try again later.',
-      );
-      return;
-    }
-    completedStages.add('scout');
+    let rankedIssues: RankedIssue[];
+    let selectedIssue: RankedIssue | undefined;
 
-    this.renderAgentStage('select', completedStages, 'Review the top ranked issues and choose the next contribution target.');
-    this.renderOpportunityList('Top ranked opportunities', rankedIssues.slice(0, 5));
-    const selectedIssue = headless
-      ? issueRankingService.selectIssueForAutomation(rankedIssues, config.automation.minMatchScore)
-      : await this.promptForIssue(rankedIssues);
+    // ── 直接指定 issue：跳过搜索 ──
+    if (options.issue) {
+      rankedIssues = [];
+      try {
+        selectedIssue = await this.resolveDirectIssue(options.issue, config);
+        logger.info(`Skipping scout — working directly on ${options.issue}`);
+      } catch (err) {
+        logger.error(`Failed to resolve issue "${options.issue}": ${err instanceof Error ? err.message : String(err)}`);
+        return;
+      }
+      completedStages.add('scout');
+      completedStages.add('select');
+      this.showSelectedOpportunity(selectedIssue, headless);
+    } else {
+      // ── 断点恢复 ──
+      const checkpoint = this.loadCheckpoint();
+      if (checkpoint && !headless && !refresh) {
+        const resumeChoice = await selectPrompt({
+          message: `Found a checkpoint from ${checkpoint.savedAt}. Resume from where you left off?`,
+          choices: [
+            { name: 'Resume (skip scout)', value: 'resume' as const },
+            { name: 'Start fresh', value: 'fresh' as const },
+          ],
+        });
+        if (resumeChoice === 'resume') {
+          rankedIssues = checkpoint.rankedIssues;
+          for (const stage of checkpoint.completedStages) {
+            completedStages.add(stage);
+          }
+          logger.info(`Resuming from checkpoint — ${completedStages.size} stage(s) already completed`);
 
-    if (!selectedIssue) {
-      ui.emptyState(
-        'OpenMeta Agent',
-        'No issue met the automation threshold',
-        `Top opportunities were below ${config.automation.minMatchScore}/100. Lower the threshold or widen your profile.`,
-      );
-      return;
+          if (checkpoint.selectedIssue) {
+            selectedIssue = checkpoint.selectedIssue;
+            this.showSelectedOpportunity(selectedIssue, headless);
+          }
+        }
+      }
+
+      // ── Scout: 搜索 issue ──
+      if (!rankedIssues!) {
+        this.renderAgentStage('scout', completedStages, 'Verifying provider access and loading ranked opportunities.');
+        rankedIssues = await ui.task({
+          title: 'Ranking contribution opportunities',
+          doneMessage: 'Opportunity ranking complete',
+          failedMessage: 'Opportunity ranking failed',
+          tone: 'info',
+        }, async () => issueRankingService.loadRankedIssues(config, { refresh }));
+        if (rankedIssues.length === 0) {
+          ui.emptyState(
+            'OpenMeta Agent',
+            'No viable issues found',
+            'No issues met the current technical match threshold. Broaden your profile or try again later.',
+          );
+          return;
+        }
+        completedStages.add('scout');
+        // 保存 checkpoint：搜索和评分是最耗时的
+        this.saveCheckpoint({ rankedIssues, completedStages: [...completedStages] });
+      }
+
+      // ── Select: 选择目标 issue ──
+      if (!selectedIssue) {
+        this.renderAgentStage('select', completedStages, 'Review the top ranked issues and choose the next contribution target.');
+        this.renderOpportunityList('Top ranked opportunities', rankedIssues.slice(0, 5));
+        selectedIssue = headless
+          ? issueRankingService.selectIssueForAutomation(rankedIssues, config.automation.minMatchScore)
+          : await this.promptForIssue(rankedIssues);
+
+        if (!selectedIssue) {
+          ui.emptyState(
+            'OpenMeta Agent',
+            'No issue met the automation threshold',
+            `Top opportunities were below ${config.automation.minMatchScore}/100. Lower the threshold or widen your profile.`,
+          );
+          return;
+        }
+        completedStages.add('select');
+        this.showSelectedOpportunity(selectedIssue, headless);
+        // 更新 checkpoint
+        this.saveCheckpoint({ rankedIssues, selectedIssue, completedStages: [...completedStages] });
+      }
     }
-    completedStages.add('select');
-    this.showSelectedOpportunity(selectedIssue, headless);
 
     this.renderAgentStage('prepare', completedStages, `Cloning and inspecting ${selectedIssue.repoFullName}.`);
     const memoryBeforeRun = memoryService.load(selectedIssue.repoFullName);
@@ -202,15 +263,63 @@ export class AgentOrchestrator {
     completedStages.add('prepare');
     this.showWorkspaceSummary(workspace, memory);
 
-    this.renderAgentStage('draft', completedStages, 'Drafting patch strategy and turning it into concrete file changes.');
-    const patchDraftResult = await ui.task({
-      title: 'Generating patch strategy',
-      doneMessage: 'Patch strategy generated',
-      failedMessage: 'Patch strategy generation failed',
-      tone: 'info',
-    }, async () => llmService.generatePatchDraft(selectedIssue, workspace, memory));
-    const patchDraft = patchDraftResult.data;
-    if (patchDraftResult.status !== 'success') {
+    // ── Draft: 多方案生成并让用户选择 ──
+    let patchDraft: PatchDraft;
+    let patchDraftStatus: StructuredOutputStatus = 'success';
+
+    if (!headless) {
+      this.renderAgentStage('draft', completedStages, 'Generating multiple fix approaches and letting you choose.');
+      const multiResult = await ui.task({
+        title: 'Generating fix approaches',
+        doneMessage: 'Approaches generated',
+        failedMessage: 'Approach generation failed',
+        tone: 'info',
+      }, async () => llmService.generateMultiApproachPatch(selectedIssue, workspace, memory));
+
+      if (multiResult.status === 'success' && multiResult.data.approaches.length >= 2) {
+        // 让用户选方案
+        const approaches = multiResult.data.approaches;
+        const choice = await selectPrompt({
+          message: `Found ${approaches.length} approaches. Which one do you prefer?`,
+          choices: approaches.map((a, i) => ({
+            name: `${i === 0 ? '⭐ ' : ''}${a.name} — ${a.description}`,
+            value: a,
+          })),
+        });
+        patchDraft = choice.patchDraft;
+        logger.info(`User selected approach: ${choice.name}`);
+      } else {
+        // 多方案失败，回退到单方案
+        logger.warn('Multi-approach generation yielded insufficient approaches. Falling back to single approach.');
+        const fallback = await ui.task({
+          title: 'Generating single patch strategy',
+          doneMessage: 'Patch strategy generated',
+          failedMessage: 'Patch strategy generation failed',
+          tone: 'info',
+        }, async () => llmService.generatePatchDraft(selectedIssue, workspace, memory));
+        patchDraft = fallback.data;
+        patchDraftStatus = fallback.status;
+      }
+    } else {
+      // Headless: 直接用单方案（第一个方案，即推荐方案）
+      this.renderAgentStage('draft', completedStages, 'Drafting patch strategy and turning it into concrete file changes.');
+      const result = await ui.task({
+        title: 'Generating patch strategy',
+        doneMessage: 'Patch strategy generated',
+        failedMessage: 'Patch strategy generation failed',
+        tone: 'info',
+      }, async () => llmService.generateMultiApproachPatch(selectedIssue, workspace, memory));
+      if (result.status === 'success' && result.data.approaches.length > 0) {
+        const firstApproach = result.data.approaches[0]!;
+        patchDraft = firstApproach.patchDraft;
+      } else {
+        const fallback = await llmService.generatePatchDraft(selectedIssue, workspace, memory);
+        patchDraft = fallback.data;
+        patchDraftStatus = fallback.status;
+      }
+    }
+
+    if (patchDraftStatus !== 'success') {
       this.showStructuredReviewNotice({
         title: 'Patch strategy requires review',
         subtitle: 'OpenMeta marked the generated patch plan as review-required, so this run will preserve artifacts but skip concrete code edits.',
@@ -220,7 +329,7 @@ export class AgentOrchestrator {
       });
     }
     const implementationWorkspace = this.buildImplementationWorkspace(workspace, patchDraft);
-    const implementation = patchDraftResult.status === 'success'
+    const implementation = patchDraftStatus === 'success'
       ? await this.generateConcretePatch(selectedIssue, implementationWorkspace, patchDraft, runChecks, draftOnly)
       : {
         changedFiles: [],
@@ -259,7 +368,7 @@ export class AgentOrchestrator {
 
     const contributionPullRequest = await this.submitContributionPullRequestIfPossible({
       config,
-      allowRealPr: patchDraftResult.status === 'success' && prDraftResult.status === 'success',
+      allowRealPr: patchDraftStatus === 'success' && prDraftResult.status === 'success',
       headless,
       issue: selectedIssue,
       prDraft,
@@ -350,7 +459,7 @@ export class AgentOrchestrator {
     });
 
     const reviewRequired =
-      patchDraftResult.status !== 'success'
+      patchDraftStatus !== 'success'
       || implementation.reviewRequired
       || prDraftResult.status !== 'success';
     const finalProofRecord = {
@@ -378,6 +487,7 @@ export class AgentOrchestrator {
       proofMarkdown: finalProofMarkdown,
     });
     completedStages.add('publish');
+    this.clearCheckpoint();
 
     this.showResult({
       issue: selectedIssue,
@@ -420,11 +530,7 @@ export class AgentOrchestrator {
       doneMessage: 'Contribution opportunities scored',
       failedMessage: 'Contribution opportunity scoring failed',
       tone: 'info',
-    }, async (task) => issueRankingService.loadRankedIssues(config, {
-      refresh,
-      localOnly,
-      onStatus: (message) => task.setMessage(message),
-    }));
+    }, async () => issueRankingService.loadRankedIssues(config, { refresh, localOnly }));
     if (rankedIssues.length === 0) {
       ui.emptyState('OpenMeta Scout', 'No issues found', 'No issues met the current scoring thresholds.');
       return;
@@ -1768,6 +1874,72 @@ export class AgentOrchestrator {
     if (!status.tracking) {
       await git.commit('chore: initialize repository', { '--allow-empty': null });
       await git.raw(['push', '--set-upstream', 'origin', defaultBranch]);
+    }
+  }
+
+  // ── 直接指定 issue ──
+  private async resolveDirectIssue(ref: string, config: AppConfig): Promise<RankedIssue> {
+    const match = ref.match(/^([\w.-]+)\/([\w.-]+)#(\d+)$/);
+    if (!match || !match[1] || !match[2] || !match[3]) {
+      throw new Error(`Invalid issue reference "${ref}". Expected format: owner/repo#number`);
+    }
+    const owner = match[1];
+    const repo = match[2];
+    const issueNum = match[3];
+    const issueNumber = parseInt(issueNum, 10);
+
+    const githubIssue = await githubService.fetchIssueByRef(owner, repo, issueNumber);
+    const ranked = opportunityService.rankIssues(
+      await issueRankingService.scoreIssuesInBatches(config.userProfile, [githubIssue])
+    );
+    const result = ranked[0];
+    if (!result) {
+      throw new Error(`Failed to rank issue "${ref}". The LLM scoring may have returned no results.`);
+    }
+    return result;
+  }
+
+  // ── Checkpoint 断点恢复 ──
+  private getCheckpointPath(): string {
+    return join(ensureDirectory(join(homedir(), '.openmeta', 'state')), CHECKPOINT_FILE);
+  }
+
+  private loadCheckpoint(): AgentCheckpoint | null {
+    try {
+      const path = this.getCheckpointPath();
+      if (!existsSync(path)) return null;
+      const data = JSON.parse(readFileSync(path, 'utf-8'));
+      // 1 小时过期
+      if (Date.now() - new Date(data.savedAt).getTime() > 60 * 60 * 1000) {
+        try { unlinkSync(path); } catch { /* ok */ }
+        return null;
+      }
+      return data as AgentCheckpoint;
+    } catch {
+      return null;
+    }
+  }
+
+  private saveCheckpoint(data: { rankedIssues: RankedIssue[]; selectedIssue?: RankedIssue; completedStages: AgentStageId[] }): void {
+    try {
+      const checkpoint: AgentCheckpoint = {
+        ...data,
+        savedAt: new Date().toISOString(),
+      };
+      writeFileSync(this.getCheckpointPath(), JSON.stringify(checkpoint, null, 2), 'utf-8');
+    } catch {
+      // 非致命，静默跳过
+    }
+  }
+
+  private clearCheckpoint(): void {
+    try {
+      const path = this.getCheckpointPath();
+      if (existsSync(path)) {
+        unlinkSync(path);
+      }
+    } catch {
+      // ok
     }
   }
 }

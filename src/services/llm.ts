@@ -3,8 +3,10 @@ import { z } from 'zod';
 import {
   ImplementationDraftEnvelopeSchema,
   IssueMatchListEnvelopeSchema,
+  MultiApproachPatchEnvelopeSchema,
   PatchDraftEnvelopeSchema,
   type StructuredOutputResult,
+  type MultiApproachPatch,
   type PatchDraft,
   PullRequestDraftEnvelopeSchema,
   type PullRequestDraft,
@@ -38,7 +40,7 @@ import {
   DAILY_REPORT_GENERATE_PROMPT,
   DAILY_DIARY_GENERATE_PROMPT,
   PATCH_DRAFT_PROMPT,
-  PATCH_DRAFT_REPAIR_PROMPT,
+  MULTI_APPROACH_PATCH_PROMPT,
   PR_DRAFT_PROMPT,
   VALIDATION_REPAIR_PROMPT,
 } from '../infra/prompt-templates.js';
@@ -189,7 +191,34 @@ Repo Stars: ${i.repoStars}`
     return this.generateStructuredOutput({
       prompt,
       parser: this.parsePatchDraft.bind(this),
-      repairPrompt: PATCH_DRAFT_REPAIR_PROMPT,
+    });
+  }
+
+  async generateMultiApproachPatch(
+    issue: RankedIssue,
+    workspace: RepoWorkspaceContext,
+    memory: RepoMemory,
+  ): Promise<StructuredOutputResult<'multi_approach_patch', MultiApproachPatch>> {
+    const repoContext = [
+      `Workspace Path: ${workspace.workspacePath}`,
+      `Default Branch: ${workspace.defaultBranch}`,
+      `Candidate Files: ${workspace.candidateFiles.join(', ') || 'none'}`,
+      `Detected Test Commands: ${workspace.testCommands.map((item) => item.command).join(', ') || 'none'}`,
+      'Snippets:',
+      ...workspace.snippets.map((snippet) => `FILE: ${snippet.path}\n${snippet.content}`),
+    ].join('\n\n');
+
+    const repoMemory = this.formatRepoMemory(memory);
+
+    const prompt = fillPrompt(MULTI_APPROACH_PATCH_PROMPT, {
+      issueContext: this.formatRankedIssue(issue),
+      repoContext,
+      repoMemory,
+    });
+
+    return this.generateStructuredOutput({
+      prompt,
+      parser: this.parseMultiApproachPatch.bind(this),
     });
   }
 
@@ -360,6 +389,12 @@ Repo Stars: ${i.repoStars}`
 
   private parsePatchDraft(content: string): StructuredOutputResult<'patch_draft', PatchDraft> {
     return this.parseStructuredJson(content, PatchDraftEnvelopeSchema);
+  }
+
+  private parseMultiApproachPatch(
+    content: string,
+  ): StructuredOutputResult<'multi_approach_patch', MultiApproachPatch> {
+    return this.parseStructuredJson(content, MultiApproachPatchEnvelopeSchema);
   }
 
   private parsePullRequestDraft(

@@ -131,44 +131,51 @@ Repo Memory:
 {{repoMemory}}
 `;
 
-export const PATCH_DRAFT_REPAIR_PROMPT = `You are OpenMeta, an autonomous open source contribution agent.
+export const MULTI_APPROACH_PATCH_PROMPT = `You are OpenMeta, an autonomous open source contribution agent.
 
-The previous patch draft response was not parseable or did not match the required schema. Reformat it into strict JSON.
+Generate 2-3 distinct approaches to fix this issue. For each approach, provide a complete patch draft. The approaches should differ meaningfully — for example, minimal vs thorough, or different architectural choices.
 
-Required schema:
+Requirements:
+1. Return one valid JSON object only. No markdown. No commentary.
+2. Generate exactly 2-3 approaches with clear trade-offs.
+3. The first approach should be the recommended one.
+4. Each approach must be a complete, actionable patch draft.
+
+Output schema:
 {
   "version": "1",
-  "kind": "patch_draft",
-  "status": "success" | "needs_review",
+  "kind": "multi_approach_patch",
+  "status": "success",
   "data": {
-    "goal": "what the patch should achieve",
-    "targetFiles": [
+    "approaches": [
       {
-        "path": "relative/path/to/file",
-        "reason": "why this file matters"
+        "name": "short distinctive label",
+        "description": "one sentence explaining this approach",
+        "tradeoffs": ["pro: ...", "con: ..."],
+        "patchDraft": {
+          "goal": "what this approach should achieve",
+          "targetFiles": [
+            { "path": "relative/path/to/file", "reason": "why this file matters" }
+          ],
+          "proposedChanges": [
+            { "title": "short step title", "details": "specific implementation details", "files": ["relative/path/to/file"] }
+          ],
+          "risks": ["concrete risk"],
+          "validationNotes": ["concrete validation note"]
+        }
       }
-    ],
-    "proposedChanges": [
-      {
-        "title": "short step title",
-        "details": "specific implementation details",
-        "files": ["relative/path/to/file"]
-      }
-    ],
-    "risks": ["concrete risk"],
-    "validationNotes": ["concrete validation note"]
+    ]
   }
 }
 
-Rules:
-1. Return only one valid JSON object. No commentary.
-2. Preserve the original intended patch plan when possible.
-3. Keep target files repository-relative and concrete.
-4. If the previous response is unusable, return:
-{"version":"1","kind":"patch_draft","status":"needs_review","data":{"goal":"Insufficient context for a safe patch draft.","targetFiles":[{"path":"README.md","reason":"Placeholder target when the prior response is unusable."}],"proposedChanges":[{"title":"Needs review","details":"The previous patch draft could not be safely reconstructed.","files":["README.md"]}],"risks":["The prior model response was unusable."],"validationNotes":["Review the issue and repository context before generating a new patch draft."]}}
+Issue:
+{{issueContext}}
 
-Previous response:
-{{invalidResponse}}
+Repo Context:
+{{repoContext}}
+
+Repo Memory:
+{{repoMemory}}
 `;
 
 export const CODE_CHANGE_PROMPT = `You are OpenMeta, an autonomous open source contribution agent.

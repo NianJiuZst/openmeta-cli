@@ -12,8 +12,9 @@ export function registerAgentCommand(program: Command): void {
     .option('--draft-only', 'Generate dossier and PR draft artifacts without applying file edits or opening a PR')
     .option('--refresh', 'Ignore cached GitHub issue discovery results')
     .option('--dry-run', 'Preview artifacts without writing to git')
+    .option('--issue <ref>', 'Skip scout and work directly on a specific issue (e.g. owner/repo#123)')
     .addOption(new Option('--scheduler-run', 'Internal flag for scheduled automation').hideHelp())
-    .action((options: { headless?: boolean; force?: boolean; runChecks?: boolean; draftOnly?: boolean; refresh?: boolean; dryRun?: boolean; schedulerRun?: boolean }) => runCommand(
+    .action((options: { headless?: boolean; force?: boolean; runChecks?: boolean; draftOnly?: boolean; refresh?: boolean; dryRun?: boolean; schedulerRun?: boolean; issue?: string }) => runCommand(
       'OpenMeta Agent',
       () => agentOrchestrator.run({
         headless: options.headless,
@@ -23,6 +24,7 @@ export function registerAgentCommand(program: Command): void {
         refresh: options.refresh,
         dryRun: options.dryRun,
         schedulerRun: options.schedulerRun,
+        issue: options.issue,
       }),
     ));
 }
