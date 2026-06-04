@@ -73,4 +73,18 @@ describe('ConfigOrchestrator', () => {
       'llm.stream must be a boolean value.',
     );
   });
+
+  test('sets and validates LLM interaction output from dotted config keys', async () => {
+    const orchestrator = new ConfigOrchestrator();
+
+    await orchestrator.set('llm.showInteraction', 'true');
+    expect((await configService.get()).llm.showInteraction).toBe(true);
+
+    await orchestrator.set('llm.showInteraction', 'false');
+    expect((await configService.get()).llm.showInteraction).toBe(false);
+
+    await expect(orchestrator.set('llm.showInteraction', 'maybe')).rejects.toThrow(
+      'llm.showInteraction must be a boolean value.',
+    );
+  });
 });

@@ -46,6 +46,7 @@ function createDefaultConfig(): AppConfig {
       apiHeaders: {},
       reasoningEffort: DEFAULT_LLM_REASONING_EFFORT,
       stream: false,
+      showInteraction: false,
       activeProfile: '',
       profiles: {},
     },
@@ -187,6 +188,7 @@ export class ConfigService {
         },
         reasoningEffort: this.normalizeReasoningEffort(config.llm?.reasoningEffort),
         stream: config.llm?.stream === true,
+        showInteraction: config.llm?.showInteraction === true,
         profiles: this.normalizeProviderProfiles(config.llm?.profiles),
       },
       automation: {

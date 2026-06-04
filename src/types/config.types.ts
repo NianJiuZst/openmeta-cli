@@ -36,6 +36,7 @@ export interface LLMConfig {
   apiHeaders?: Record<string, string>;
   reasoningEffort?: LLMReasoningEffort;
   stream?: boolean;
+  showInteraction?: boolean;
   activeProfile?: string;
   profiles?: Record<string, LLMProviderProfile>;
 }

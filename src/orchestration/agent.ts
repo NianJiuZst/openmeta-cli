@@ -14,6 +14,7 @@ import type {
 } from '../types/index.js';
 import {
   configService,
+  createLLMInteractionReporter,
   ensureDirectory,
   getLocalDateStamp,
   getOpenMetaArtifactRoot,
@@ -808,6 +809,8 @@ export class AgentOrchestrator {
       config.llm.provider,
       config.llm.reasoningEffort,
       config.llm.stream === true,
+      config.llm.showInteraction === true,
+      createLLMInteractionReporter(config.llm.showInteraction === true),
     );
     const llmValid = await ui.task({
       title: 'Validating LLM provider',

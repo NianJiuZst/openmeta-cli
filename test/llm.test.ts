@@ -1,8 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { LLMService } from '../src/services/llm.js';
 import type { StructuredOutputStatus } from '../src/contracts/index.js';
-import type { ImplementationDraft, MatchedIssue } from '../src/types/index.js';
+import type { ImplementationDraft, LLMProvider, MatchedIssue } from '../src/types/index.js';
 import { createIssue, createMemory, createRankedIssue, createWorkspace } from './helpers/factories.js';
+import type {
+  LLMInteractionEvent,
+  LLMInteractionReporter,
+} from '../src/infra/llm-interaction-reporter.js';
 
 interface LLMServiceInternals {
   validateConnection(): Promise<boolean>;
@@ -93,6 +97,52 @@ interface LLMServiceInternals {
   };
   formatRepoMemory(memory: ReturnType<typeof createMemory>): string;
 }
+
+type RecordedInteractionEvent =
+  | { type: 'start'; event: LLMInteractionEvent }
+  | { type: 'chunk'; chunk: string }
+  | { type: 'complete'; event: LLMInteractionEvent & { responseChars: number } }
+  | { type: 'parse'; event: LLMInteractionEvent & { kind: string; status: string } }
+  | { type: 'repair'; event: LLMInteractionEvent & { error: string } };
+
+function createRecordingReporter(events: RecordedInteractionEvent[]): LLMInteractionReporter {
+  return {
+    onRequestStart: (event) => events.push({ type: 'start', event }),
+    onResponseChunk: (chunk) => events.push({ type: 'chunk', chunk }),
+    onResponseComplete: (event) => events.push({ type: 'complete', event }),
+    onParseComplete: (event) => events.push({ type: 'parse', event }),
+    onRepairStart: (event) => events.push({ type: 'repair', event }),
+  };
+}
+
+type InitializableService = LLMServiceInternals & {
+  initialize(
+    apiKey: string,
+    baseUrl: string,
+    modelName?: string,
+    apiHeaders?: Record<string, string>,
+    provider?: LLMProvider,
+    reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh',
+    stream?: boolean,
+    showInteraction?: boolean,
+    interactionReporter?: LLMInteractionReporter,
+  ): void;
+  generateDailyReport(issueAnalysis: string): Promise<string>;
+  generatePatchDraft(
+    issue: ReturnType<typeof createRankedIssue>,
+    workspace: ReturnType<typeof createWorkspace>,
+    memory: ReturnType<typeof createMemory>,
+  ): Promise<{
+    status: StructuredOutputStatus;
+    data: {
+      goal: string;
+      targetFiles: Array<{ path: string; reason: string }>;
+      proposedChanges: Array<{ title: string; details: string; files: string[] }>;
+      risks: string[];
+      validationNotes: string[];
+    };
+  }>;
+};
 
 describe('LLMService repository suggestion parsing', () => {
   test('parses structured repository suggestions and keeps the highest scoring duplicate', () => {
@@ -672,6 +722,279 @@ describe('LLMService reasoning effort requests', () => {
     await service.generateDailyReport('issue analysis');
 
     expect(payloads[0]).not.toHaveProperty('reasoning_effort');
+  });
+});
+
+describe('LLMService interaction reporting', () => {
+  test('emits non-streaming request and response lifecycle events when enabled', async () => {
+    const events: RecordedInteractionEvent[] = [];
+    const service = new LLMService() as unknown as InitializableService;
+    const payloads: Array<Record<string, unknown>> = [];
+
+    service.initialize(
+      'sk-test',
+      'https://api.openai.com/v1',
+      'gpt-5.5',
+      {},
+      'openai',
+      'none',
+      false,
+      true,
+      createRecordingReporter(events),
+    );
+    service.client = {
+      chat: {
+        completions: {
+          create: async (payload) => {
+            payloads.push(payload);
+            return { choices: [{ message: { content: 'done' } }] };
+          },
+        },
+      },
+    };
+
+    const content = await service.generateDailyReport('issue analysis');
+
+    expect(content).toBe('done');
+    expect(payloads[0]).not.toHaveProperty('stream');
+    expect(events).toHaveLength(2);
+    expect(events[0]).toEqual({
+      type: 'start',
+      event: expect.objectContaining({
+        stage: 'daily_report',
+        model: 'gpt-5.5',
+        provider: 'openai',
+        streaming: false,
+        promptChars: expect.any(Number),
+      }),
+    });
+    expect(events[1]).toEqual({
+      type: 'complete',
+      event: expect.objectContaining({
+        stage: 'daily_report',
+        responseChars: 4,
+      }),
+    });
+  });
+
+  test('does not enable streaming transport when only interaction output is enabled', async () => {
+    const events: RecordedInteractionEvent[] = [];
+    const service = new LLMService() as unknown as InitializableService;
+    const payloads: Array<Record<string, unknown>> = [];
+
+    service.initialize(
+      'sk-test',
+      'https://api.openai.com/v1',
+      'gpt-5.5',
+      {},
+      'openai',
+      'none',
+      false,
+      true,
+      createRecordingReporter(events),
+    );
+    service.client = {
+      chat: {
+        completions: {
+          create: async (payload) => {
+            payloads.push(payload);
+            return { choices: [{ message: { content: 'done' } }] };
+          },
+        },
+      },
+    };
+
+    await service.generateDailyReport('issue analysis');
+
+    expect(payloads[0]).not.toHaveProperty('stream');
+    expect(payloads[0]).not.toHaveProperty('stream_options');
+    expect(events.find((event) => event.type === 'start')).toEqual({
+      type: 'start',
+      event: expect.objectContaining({
+        streaming: false,
+      }),
+    });
+  });
+
+  test('emits streamed chunk events when streaming and interaction output are enabled', async () => {
+    const events: RecordedInteractionEvent[] = [];
+    const service = new LLMService() as unknown as InitializableService;
+
+    async function* streamChunks() {
+      yield { choices: [{ delta: { content: 'hel' } }] };
+      yield { choices: [{ delta: { content: 'lo' } }] };
+      yield { choices: [], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } };
+    }
+
+    service.initialize(
+      'sk-test',
+      'https://api.openai.com/v1',
+      'gpt-5.5',
+      {},
+      'openai',
+      'none',
+      true,
+      true,
+      createRecordingReporter(events),
+    );
+    service.client = {
+      chat: {
+        completions: {
+          create: () => streamChunks(),
+        },
+      },
+    };
+
+    const content = await service.generateDailyReport('issue analysis');
+
+    expect(content).toBe('hello');
+    expect(events.filter((event) => event.type === 'chunk')).toEqual([
+      { type: 'chunk', chunk: 'hel' },
+      { type: 'chunk', chunk: 'lo' },
+    ]);
+    expect(events.find((event) => event.type === 'start')).toEqual({
+      type: 'start',
+      event: expect.objectContaining({
+        stage: 'daily_report',
+        streaming: true,
+      }),
+    });
+    expect(events.find((event) => event.type === 'complete')).toEqual({
+      type: 'complete',
+      event: expect.objectContaining({
+        responseChars: 5,
+      }),
+    });
+  });
+
+  test('emits parse and repair lifecycle events for structured output', async () => {
+    const events: RecordedInteractionEvent[] = [];
+    const service = new LLMService() as unknown as InitializableService;
+    let requestCount = 0;
+
+    service.initialize(
+      'sk-test',
+      'https://api.openai.com/v1',
+      'gpt-5.5',
+      {},
+      'openai',
+      'none',
+      false,
+      true,
+      createRecordingReporter(events),
+    );
+    service.client = {
+      chat: {
+        completions: {
+          create: async () => {
+            requestCount += 1;
+            if (requestCount === 1) {
+              return {
+                choices: [{ message: { content: 'Plan: update the button component and tests.' } }],
+              };
+            }
+
+            return {
+              choices: [{
+                message: {
+                  content: JSON.stringify({
+                    version: '1',
+                    kind: 'patch_draft',
+                    status: 'success',
+                    data: {
+                      goal: 'Add accessible labels to icon-only buttons',
+                      targetFiles: [
+                        {
+                          path: 'src/components/IconButton.tsx',
+                          reason: 'Primary component logic',
+                        },
+                      ],
+                      proposedChanges: [
+                        {
+                          title: 'Update button API',
+                          details: 'Require an accessible label for icon-only rendering.',
+                          files: ['src/components/IconButton.tsx'],
+                        },
+                      ],
+                      risks: ['Consumer code may rely on current behavior'],
+                      validationNotes: ['Run bun test after the patch'],
+                    },
+                  }),
+                },
+              }],
+            };
+          },
+        },
+      },
+    };
+
+    const draft = await service.generatePatchDraft(
+      createRankedIssue(),
+      createWorkspace({ validationCommands: createWorkspace().testCommands }),
+      createMemory(),
+    );
+
+    expect(draft.status).toBe('success');
+    expect(events.find((event) => event.type === 'repair')).toEqual({
+      type: 'repair',
+      event: expect.objectContaining({
+        stage: 'patch_draft',
+        context: 'acme/demo#42',
+        error: expect.stringContaining('parseable JSON object'),
+      }),
+    });
+    expect(events.filter((event) => event.type === 'parse')).toEqual([
+      {
+        type: 'parse',
+        event: expect.objectContaining({
+          stage: 'patch_draft',
+          kind: 'patch_draft',
+          status: 'success',
+        }),
+      },
+    ]);
+  });
+
+  test('ignores reporter failures so LLM calls can still complete', async () => {
+    const service = new LLMService() as unknown as InitializableService;
+    const throwingReporter: LLMInteractionReporter = {
+      onRequestStart: () => {
+        throw new Error('reporter failed');
+      },
+      onResponseChunk: () => {
+        throw new Error('reporter failed');
+      },
+      onResponseComplete: () => {
+        throw new Error('reporter failed');
+      },
+      onParseComplete: () => {
+        throw new Error('reporter failed');
+      },
+      onRepairStart: () => {
+        throw new Error('reporter failed');
+      },
+    };
+
+    service.initialize(
+      'sk-test',
+      'https://api.openai.com/v1',
+      'gpt-5.5',
+      {},
+      'openai',
+      'none',
+      false,
+      true,
+      throwingReporter,
+    );
+    service.client = {
+      chat: {
+        completions: {
+          create: async () => ({ choices: [{ message: { content: 'done' } }] }),
+        },
+      },
+    };
+
+    await expect(service.generateDailyReport('issue analysis')).resolves.toBe('done');
   });
 });
 

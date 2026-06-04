@@ -25,6 +25,11 @@ import type {
   UserProfile,
 } from '../types/index.js';
 import { logger } from '../infra/logger.js';
+import type {
+  LLMInteractionEvent,
+  LLMInteractionReporter,
+  LLMInteractionStage,
+} from '../infra/llm-interaction-reporter.js';
 import {
   LLM_VALIDATION_FALLBACK_HINTS,
   LLM_VALIDATION_PROMPT,
@@ -54,6 +59,8 @@ export class LLMService {
   private provider: LLMProvider = 'openai';
   private reasoningEffort: LLMReasoningEffort | undefined;
   private stream = false;
+  private showInteraction = false;
+  private interactionReporter: LLMInteractionReporter | undefined;
   private lastValidationError: string | null = null;
 
   initialize(
@@ -64,6 +71,8 @@ export class LLMService {
     provider?: LLMProvider,
     reasoningEffort?: LLMReasoningEffort,
     stream?: boolean,
+    showInteraction?: boolean,
+    interactionReporter?: LLMInteractionReporter,
   ): void {
     this.client = new OpenAI({
       apiKey,
@@ -78,6 +87,8 @@ export class LLMService {
     }
     this.reasoningEffort = reasoningEffort;
     this.stream = stream === true;
+    this.showInteraction = showInteraction === true;
+    this.interactionReporter = interactionReporter;
   }
 
   async validateConnection(): Promise<boolean> {
@@ -91,6 +102,8 @@ export class LLMService {
       const timeout = setTimeout(() => controller.abort(), LLM_VALIDATION_TIMEOUT_MS);
 
       try {
+        const interactionEvent = this.createInteractionEvent('validate', LLM_VALIDATION_PROMPT);
+        this.emitRequestStart(interactionEvent);
         const response = await this.client.chat.completions.create({
           model: this.modelName,
           messages: [{ role: 'user', content: LLM_VALIDATION_PROMPT }],
@@ -100,10 +113,12 @@ export class LLMService {
         }, {
           signal: controller.signal,
         });
+        const content = await this.extractChatContent(response);
+        this.emitResponseComplete({ ...interactionEvent, responseChars: content.length });
 
         // 自定义兼容端点最容易把站点页面或其他 200 响应误判为可用，所以这里额外校验返回结构。
         if (this.provider === 'custom') {
-          await this.assertCustomValidationResponse(response);
+          await this.assertCustomValidationResponse(response, content);
         }
       } finally {
         clearTimeout(timeout);
@@ -154,6 +169,8 @@ Repo Stars: ${i.repoStars}`
       prompt,
       parser: (content) => this.parseLLMResponse(content, issues),
       repairPrompt: ISSUE_MATCH_REPAIR_PROMPT,
+      stage: 'issue_scoring',
+      context: `${issues.length} issue${issues.length === 1 ? '' : 's'}`,
     });
   }
 
@@ -162,7 +179,7 @@ Repo Stars: ${i.repoStars}`
       issueAnalysis,
     });
 
-    return await this.chat(prompt);
+    return await this.chat(prompt, { stage: 'daily_report' });
   }
 
   async generateDailyDiary(issueAnalysis: string, userCodeSnippets: string): Promise<string> {
@@ -171,7 +188,7 @@ Repo Stars: ${i.repoStars}`
       userCodeSnippets: userCodeSnippets || 'No code snippets provided.',
     });
 
-    return await this.chat(prompt);
+    return await this.chat(prompt, { stage: 'daily_diary' });
   }
 
   async generatePatchDraft(
@@ -203,6 +220,8 @@ Repo Stars: ${i.repoStars}`
       prompt,
       parser: this.parsePatchDraft.bind(this),
       repairPrompt: PATCH_DRAFT_REPAIR_PROMPT,
+      stage: 'patch_draft',
+      context: this.getIssueReference(issue),
     });
   }
 
@@ -235,6 +254,8 @@ Repo Stars: ${i.repoStars}`
       parser: this.parseRepositorySuggestions.bind(this),
       repairPrompt: REPOSITORY_ANALYSIS_REPAIR_PROMPT,
       temperature: 0.2,
+      stage: 'repository_analysis',
+      context: repoFullName,
     });
   }
 
@@ -258,6 +279,8 @@ Repo Stars: ${i.repoStars}`
       parser: this.parseImplementationDraft.bind(this),
       repairPrompt: CODE_CHANGE_REPAIR_PROMPT,
       temperature: 0.1,
+      stage: 'implementation_draft',
+      context: this.getIssueReference(issue),
     });
   }
 
@@ -281,6 +304,8 @@ Repo Stars: ${i.repoStars}`
     return this.generateStructuredOutput({
       prompt,
       parser: this.parsePullRequestDraft.bind(this),
+      stage: 'pull_request_draft',
+      context: this.getIssueReference(issue),
     });
   }
 
@@ -311,15 +336,19 @@ Repo Stars: ${i.repoStars}`
       parser: this.parseImplementationDraft.bind(this),
       repairPrompt: CODE_CHANGE_REPAIR_PROMPT,
       temperature: 0.1,
+      stage: 'validation_repair',
+      context: this.getIssueReference(issue),
     });
   }
 
-  private async chat(prompt: string, options: { temperature?: number } = {}): Promise<string> {
+  private async chat(prompt: string, options: { temperature?: number; stage?: LLMInteractionStage; context?: string } = {}): Promise<string> {
     if (!this.client) {
       throw new Error('LLM client not initialized');
     }
 
     try {
+      const interactionEvent = this.createInteractionEvent(options.stage ?? 'daily_report', prompt, options.context);
+      this.emitRequestStart(interactionEvent);
       const response = await this.client.chat.completions.create({
         model: this.modelName,
         messages: [
@@ -331,7 +360,9 @@ Repo Stars: ${i.repoStars}`
         ...this.getReasoningRequestParams(),
       });
 
-      return await this.extractChatContent(response);
+      const content = await this.extractChatContent(response);
+      this.emitResponseComplete({ ...interactionEvent, responseChars: content.length });
+      return content;
     } catch (error) {
       logger.debug('LLM chat failed', error);
       throw new Error('The LLM request failed. Please verify your provider, model, and API key.');
@@ -343,7 +374,11 @@ Repo Stars: ${i.repoStars}`
       let content = '';
 
       for await (const chunk of response) {
-        content += this.extractStreamChunkContent(chunk);
+        const chunkContent = this.extractStreamChunkContent(chunk);
+        content += chunkContent;
+        if (chunkContent) {
+          this.emitResponseChunk(chunkContent);
+        }
       }
 
       return content;
@@ -400,23 +435,98 @@ Repo Stars: ${i.repoStars}`
     parser: (content: string) => T;
     repairPrompt?: string;
     temperature?: number;
+    stage: LLMInteractionStage;
+    context?: string;
   }): Promise<T> {
-    const content = await this.chat(input.prompt, { temperature: input.temperature });
+    const interactionEvent = this.createInteractionEvent(input.stage, input.prompt, input.context);
+    const content = await this.chat(input.prompt, {
+      temperature: input.temperature,
+      stage: input.stage,
+      context: input.context,
+    });
 
     try {
-      return input.parser(content);
+      const parsed = input.parser(content);
+      this.emitParseComplete(interactionEvent, parsed);
+      return parsed;
     } catch (error) {
       if (!input.repairPrompt) {
         throw error;
       }
 
       logger.debug('Structured output parsing failed, attempting repair', error);
+      this.emitRepairStart({
+        ...interactionEvent,
+        error: error instanceof Error ? error.message : String(error),
+      });
       const repairedContent = await this.chat(fillPrompt(input.repairPrompt, {
         invalidResponse: content.slice(0, 12000),
-      }), { temperature: 0 });
+      }), { temperature: 0, stage: input.stage, context: input.context });
 
-      return input.parser(repairedContent);
+      const parsed = input.parser(repairedContent);
+      this.emitParseComplete(interactionEvent, parsed);
+      return parsed;
     }
+  }
+
+  private createInteractionEvent(stage: LLMInteractionStage, prompt: string, context?: string): LLMInteractionEvent {
+    return {
+      stage,
+      model: this.modelName,
+      provider: this.provider,
+      streaming: this.stream,
+      promptChars: prompt.length,
+      context,
+    };
+  }
+
+  private emitRequestStart(event: LLMInteractionEvent): void {
+    this.withInteractionReporter((reporter) => reporter.onRequestStart(event));
+  }
+
+  private emitResponseChunk(chunk: string): void {
+    this.withInteractionReporter((reporter) => reporter.onResponseChunk(chunk));
+  }
+
+  private emitResponseComplete(event: LLMInteractionEvent & { responseChars: number }): void {
+    this.withInteractionReporter((reporter) => reporter.onResponseComplete(event));
+  }
+
+  private emitParseComplete(event: LLMInteractionEvent, parsed: unknown): void {
+    const metadata = this.getStructuredOutputMetadata(parsed);
+    this.withInteractionReporter((reporter) => reporter.onParseComplete({
+      ...event,
+      kind: metadata.kind,
+      status: metadata.status,
+    }));
+  }
+
+  private emitRepairStart(event: LLMInteractionEvent & { error: string }): void {
+    this.withInteractionReporter((reporter) => reporter.onRepairStart(event));
+  }
+
+  private withInteractionReporter(callback: (reporter: LLMInteractionReporter) => void): void {
+    if (!this.showInteraction || !this.interactionReporter) {
+      return;
+    }
+
+    try {
+      callback(this.interactionReporter);
+    } catch {
+      // Reporter output is diagnostic only and must not affect LLM execution.
+    }
+  }
+
+  private getStructuredOutputMetadata(parsed: unknown): { kind: string; status: string } {
+    if (typeof parsed === 'object' && parsed !== null) {
+      const record = parsed as Record<string, unknown>;
+      return {
+        kind: typeof record['kind'] === 'string' ? record['kind'] : 'structured_output',
+        status: typeof record['status'] === 'string' ? record['status'] : 'success',
+      };
+    }
+
+    return { kind: 'structured_output', status: 'success' };
   }
 
   private parseLLMResponse(
@@ -672,9 +782,9 @@ Repo Stars: ${i.repoStars}`
     return error instanceof Error && (error.name === 'AbortError' || error.message.toLowerCase().includes('aborted'));
   }
 
-  private async assertCustomValidationResponse(response: unknown): Promise<void> {
+  private async assertCustomValidationResponse(response: unknown, streamedContent?: string): Promise<void> {
     if (this.isAsyncIterable(response)) {
-      const content = await this.extractChatContent(response);
+      const content = streamedContent ?? '';
       if (content.trim().length === 0) {
         throw new Error('Custom provider validation response did not include a usable assistant reply.');
       }
