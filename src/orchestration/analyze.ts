@@ -4,6 +4,7 @@ import type { PatchDraft, PullRequestDraft, RepositoryImprovementSuggestion } fr
 import type { AppConfig, RankedIssue, RepoWorkspaceContext } from '../types/index.js';
 import {
   configService,
+  createLLMInteractionReporter,
   ensureDirectory,
   getLocalDateStamp,
   getOpenMetaArtifactRoot,
@@ -204,6 +205,9 @@ export class AnalyzeOrchestrator {
       config.llm.provider,
       config.llm.reasoningEffort,
       config.llm.stream === true,
+      config.llm.showInteraction === true,
+      createLLMInteractionReporter(config.llm.showInteraction === true, config.llm.interactionMode || 'summary'),
+      config.llm.interactionMode || 'summary',
     );
     const llmValid = await ui.task({
       title: 'Validating LLM provider',

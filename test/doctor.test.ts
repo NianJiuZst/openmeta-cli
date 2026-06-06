@@ -93,6 +93,25 @@ describe('DoctorOrchestrator', () => {
     expect(report.checks.find((check) => check.id === 'llm-config')?.status).toBe('pass');
   });
 
+  test('includes LLM interaction output state in diagnostics', async () => {
+    const report = await new DoctorOrchestrator().inspect(createConfig({
+      llm: {
+        provider: 'openai',
+        apiBaseUrl: 'https://api.openai.com/v1',
+        apiKey: 'sk-test-key',
+        modelName: 'gpt-5.5',
+        stream: true,
+        showInteraction: true,
+        interactionMode: 'summary',
+      },
+    }));
+
+    const detail = report.checks.find((check) => check.id === 'llm-config')?.detail;
+
+    expect(detail).toContain('streaming yes');
+    expect(detail).toContain('interaction output yes (summary)');
+  });
+
   test('marks missing credentials as critical failures', async () => {
     const report = await new DoctorOrchestrator().inspect(createConfig({
       github: {

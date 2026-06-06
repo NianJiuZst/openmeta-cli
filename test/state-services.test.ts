@@ -92,8 +92,27 @@ describe('stateful services', () => {
 
     expect(loaded.github.username).toBe('partial-user');
     expect(loaded.llm.modelName).toBe('gpt-4o-mini');
+    expect(loaded.llm.showInteraction).toBe(false);
+    expect(loaded.llm.interactionMode).toBe('summary');
     expect(loaded.automation.enabled).toBe(false);
     expect(loaded.automation.scheduleTime).toBe('09:00');
+  });
+
+  test('config service defaults LLM interaction output to false', async () => {
+    const service = new ConfigService();
+    const configPath = service.getConfigPath();
+
+    rmSync(join(tempRoot, '.config'), { recursive: true, force: true });
+    mkdirSync(join(tempRoot, '.config', 'openmeta'), { recursive: true });
+    writeFileSync(configPath, JSON.stringify({
+      github: { pat: '', username: '' },
+      llm: { apiKey: '', apiBaseUrl: 'https://example.com/v1', modelName: 'test-model' },
+    }), 'utf-8');
+
+    const loaded = await service.load();
+
+    expect(loaded.llm.showInteraction).toBe(false);
+    expect(loaded.llm.interactionMode).toBe('summary');
   });
 
   test('memory service persists repo memory snapshots', () => {

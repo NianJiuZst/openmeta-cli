@@ -9,7 +9,7 @@ import {
   findLLMProviderPreset,
   type SchedulerSyncResult,
 } from '../services/index.js';
-import { configService, DEFAULT_LLM_REASONING_EFFORT, LLM_REASONING_EFFORTS, prompt, selectPrompt, ui } from '../infra/index.js';
+import { configService, createLLMInteractionReporter, DEFAULT_LLM_REASONING_EFFORT, LLM_REASONING_EFFORTS, prompt, selectPrompt, ui } from '../infra/index.js';
 import type { ContentType } from '../types/content.types.js';
 import type { LLMReasoningEffort } from '../types/index.js';
 
@@ -189,18 +189,21 @@ export class InitOrchestrator {
     let apiKey = config.llm.apiKey;
     let reasoningEffort = config.llm.reasoningEffort || DEFAULT_LLM_REASONING_EFFORT;
     let stream = config.llm.stream === true;
+    let showInteraction = config.llm.showInteraction === true;
+    let interactionMode = config.llm.interactionMode || 'summary';
 
     await stepOrSkip(
       'llm',
       !!(apiKey && apiBaseUrl && modelValue),
       'LLM provider is already configured.',
       () => {
-        llmService.initialize(apiKey, apiBaseUrl, modelValue, apiHeaders, providerValue, reasoningEffort, stream);
+        llmService.initialize(apiKey, apiBaseUrl, modelValue, apiHeaders, providerValue, reasoningEffort, stream, showInteraction, createLLMInteractionReporter(showInteraction, interactionMode), interactionMode);
         ui.keyValues('LLM provider connected', [
           { label: 'Provider', value: selectedProvider?.name ?? providerValue, tone: 'success' },
           { label: 'Model', value: modelValue, tone: 'success' },
           { label: 'Reasoning effort', value: reasoningEffort, tone: 'info' },
           { label: 'Streaming', value: stream ? 'yes' : 'no', tone: stream ? 'info' : 'muted' },
+          { label: 'Interaction output', value: showInteraction ? 'yes' : 'no', tone: showInteraction ? 'info' : 'muted' },
           { label: 'Endpoint', value: apiBaseUrl, tone: 'info' },
           { label: 'Extra headers', value: Object.keys(apiHeaders).length > 0 ? JSON.stringify(apiHeaders) : '(none)', tone: 'info' },
           { label: 'API key', value: ui.maskSecret(apiKey), tone: 'success' },
@@ -238,9 +241,10 @@ export class InitOrchestrator {
 
           reasoningEffort = await this.promptReasoningEffort(config.llm.reasoningEffort);
           stream = await this.promptLlmStreaming(config.llm.stream);
+          showInteraction = await this.promptLlmInteractionOutput(config.llm.showInteraction);
           apiKey = await this.promptAPIKey();
 
-          llmService.initialize(apiKey, apiBaseUrl, modelValue, apiHeaders, selectedProvider.value as AppConfig['llm']['provider'], reasoningEffort, stream);
+          llmService.initialize(apiKey, apiBaseUrl, modelValue, apiHeaders, selectedProvider.value as AppConfig['llm']['provider'], reasoningEffort, stream, showInteraction, createLLMInteractionReporter(showInteraction, interactionMode), interactionMode);
           llmValid = await this.validateLlmConnection();
 
           if (!llmValid) {
@@ -267,12 +271,13 @@ export class InitOrchestrator {
           }
         }
         completedSteps.add('llm');
-        await commit({ llm: { provider: providerValue as AppConfig['llm']['provider'], apiBaseUrl, apiKey, modelName: modelValue, apiHeaders, reasoningEffort, stream } });
+        await commit({ llm: { provider: providerValue as AppConfig['llm']['provider'], apiBaseUrl, apiKey, modelName: modelValue, apiHeaders, reasoningEffort, stream, showInteraction, interactionMode } });
         ui.keyValues('LLM provider connected', [
           { label: 'Provider', value: selectedProvider!.name, tone: 'success' },
           { label: 'Model', value: modelValue, tone: 'success' },
           { label: 'Reasoning effort', value: reasoningEffort, tone: 'info' },
           { label: 'Streaming', value: stream ? 'yes' : 'no', tone: stream ? 'info' : 'muted' },
+          { label: 'Interaction output', value: showInteraction ? 'yes' : 'no', tone: showInteraction ? 'info' : 'muted' },
           { label: 'Endpoint', value: apiBaseUrl, tone: 'info' },
           { label: 'Extra headers', value: Object.keys(apiHeaders).length > 0 ? JSON.stringify(apiHeaders) : '(none)', tone: 'info' },
           { label: 'API key', value: ui.maskSecret(apiKey), tone: 'success' },
@@ -443,6 +448,7 @@ export class InitOrchestrator {
       { label: 'Model', value: modelValue, hint: selectedProvider?.name, tone: 'success' },
       { label: 'Reasoning', value: reasoningEffort, tone: 'info' },
       { label: 'Streaming', value: stream ? 'YES' : 'NO', tone: stream ? 'info' : 'muted' },
+      { label: 'LLM output', value: showInteraction ? 'DETAILED' : 'QUIET', tone: showInteraction ? 'info' : 'muted' },
       { label: 'Repo policy', value: targetRepoPath ? 'CUSTOM' : 'MANAGED', tone: 'accent' },
       { label: 'Automation', value: automationEnabled ? 'ENABLED' : 'MANUAL', tone: automationEnabled ? 'warning' : 'muted' },
     ]);
@@ -533,6 +539,19 @@ export class InitOrchestrator {
     ]);
 
     return stream;
+  }
+
+  private async promptLlmInteractionOutput(defaultValue?: boolean): Promise<boolean> {
+    const { showInteraction } = await prompt<{ showInteraction: boolean }>([
+      {
+        type: 'confirm',
+        name: 'showInteraction',
+        message: 'Show detailed LLM interaction output?',
+        default: defaultValue === true,
+      },
+    ]);
+
+    return showInteraction;
   }
 
   private async promptUsername(): Promise<string> {

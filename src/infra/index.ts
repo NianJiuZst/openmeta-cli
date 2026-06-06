@@ -14,6 +14,16 @@ export type {
 } from './github-repo.js';
 export { UserCancelledError, isPromptAbortError, isUserCancelledError, getErrorMessage } from './errors.js';
 export { DEFAULT_LLM_REASONING_EFFORT, LLM_REASONING_EFFORTS, parseLLMReasoningEffort } from './llm-reasoning.js';
+export {
+  BufferedLLMInteractionReporter,
+  NoopLLMInteractionReporter,
+  createLLMInteractionReporter,
+} from './llm-interaction-reporter.js';
+export type {
+  LLMInteractionEvent,
+  LLMInteractionReporter,
+  LLMInteractionStage,
+} from './llm-interaction-reporter.js';
 export { prompt } from './prompts.js';
 export { selectPrompt } from './select.js';
 export { ui } from './ui.js';

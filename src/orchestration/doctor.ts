@@ -276,7 +276,7 @@ export class DoctorOrchestrator {
       label: 'LLM configuration',
       status: 'pass',
       summary: `${config.llm.provider} provider is configured.`,
-      detail: `${config.llm.modelName} at ${config.llm.apiBaseUrl}; reasoning ${config.llm.reasoningEffort || 'none'}; streaming ${config.llm.stream ? 'yes' : 'no'}; key ${ui.maskSecret(config.llm.apiKey)}`,
+      detail: `${config.llm.modelName} at ${config.llm.apiBaseUrl}; reasoning ${config.llm.reasoningEffort || 'none'}; streaming ${config.llm.stream ? 'yes' : 'no'}; interaction output ${config.llm.showInteraction ? `yes (${config.llm.interactionMode || 'summary'})` : 'no'}; key ${ui.maskSecret(config.llm.apiKey)}`,
     };
   }
 

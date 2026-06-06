@@ -6,6 +6,7 @@ import type { LLMReasoningEffort } from '../src/types/index.js';
 interface InitOrchestratorInternals {
   promptReasoningEffort(defaultValue?: LLMReasoningEffort): Promise<LLMReasoningEffort>;
   promptLlmStreaming(defaultValue?: boolean): Promise<boolean>;
+  promptLlmInteractionOutput(defaultValue?: boolean): Promise<boolean>;
 }
 
 describe('InitOrchestrator LLM reasoning setup', () => {
@@ -43,6 +44,27 @@ describe('InitOrchestrator LLM reasoning setup', () => {
           type: 'confirm',
           name: 'stream',
           message: 'Use streaming LLM responses?',
+          default: false,
+        }),
+      ]);
+    } finally {
+      promptSpy.mockRestore();
+    }
+  });
+
+  test('defaults interaction output selection to false during init', async () => {
+    const orchestrator = new InitOrchestrator() as unknown as InitOrchestratorInternals;
+    const promptSpy = spyOn(infra, 'prompt').mockResolvedValue({ showInteraction: false });
+
+    try {
+      const selected = await orchestrator.promptLlmInteractionOutput();
+
+      expect(selected).toBe(false);
+      expect(promptSpy).toHaveBeenCalledWith([
+        expect.objectContaining({
+          type: 'confirm',
+          name: 'showInteraction',
+          message: 'Show detailed LLM interaction output?',
           default: false,
         }),
       ]);
