@@ -300,6 +300,20 @@ export class GitHubService {
     return this.username;
   }
 
+  async fetchIssueByRef(owner: string, repo: string, issueNumber: number): Promise<GitHubIssue> {
+    if (!this.octokit) throw new Error('GitHub service not initialized');
+    const { data: item } = await this.octokit.rest.issues.get({ owner, repo, issue_number: issueNumber });
+    const repoData = await this.fetchRepoMetadata({ owner, repo, fullName: `${owner}/${repo}` }, new Map());
+    return {
+      id: item.id, number: item.number, title: item.title, body: item.body || '',
+      htmlUrl: item.html_url, repoName: repo, repoFullName: `${owner}/${repo}`,
+      repoDescription: repoData.description, repoStars: repoData.stars,
+      labels: (item.labels && Array.isArray(item.labels)
+        ? (item.labels as Array<{ name?: string }>).map((l) => l.name ?? '').filter(Boolean) : []),
+      createdAt: item.created_at, updatedAt: item.updated_at,
+    };
+  }
+
   private buildSearchQuery(labels: readonly string[], repoFullName?: string): string {
     const joinedLabels = labels.map((label) => `label:"${label}"`).join(' OR ');
     const repoScope = repoFullName ? `repo:${repoFullName} ` : '';

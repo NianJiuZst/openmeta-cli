@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import { Octokit } from '@octokit/rest';
@@ -80,6 +80,14 @@ interface ConcretePatchResult {
 
 type AgentStageId = 'scout' | 'select' | 'prepare' | 'draft' | 'validate' | 'pr' | 'publish';
 const ARTIFACT_PUBLISH_BRANCH = 'openmeta-artifacts';
+const CHECKPOINT_FILE = 'agent-checkpoint.json';
+
+interface AgentCheckpoint {
+  rankedIssues: RankedIssue[];
+  selectedIssue?: RankedIssue;
+  completedStages: AgentStageId[];
+  savedAt: string;
+}
 
 const AGENT_STAGES: Array<{ id: AgentStageId; label: string; description: string }> = [
   {
@@ -162,23 +170,44 @@ export class AgentOrchestrator {
       await this.confirmManualHeadlessRun(config);
     }
 
-    this.renderAgentStage('scout', completedStages, issueTarget
-      ? `Verifying provider access and loading ${issueTarget.repoFullName}#${issueTarget.issueNumber}.`
-      : 'Verifying provider access and loading ranked opportunities.');
-    await this.initializeClients(config);
+    // ── 断点恢复：如果有 checkpoint 且不是 headless/refresh，提示用户 ──
+    if (!issueTarget && !headless && !refresh && this.loadCheckpoint()) {
+      const checkpoint = this.loadCheckpoint()!;
+      const resumeChoice = await selectPrompt({
+        message: `Found a checkpoint from ${checkpoint.savedAt}. Resume from where you left off?`,
+        choices: [
+          { name: 'Resume (skip scout)', value: 'resume' as const },
+          { name: 'Start fresh', value: 'fresh' as const },
+        ],
+      });
+      if (resumeChoice === 'resume') {
+        for (const stage of checkpoint.completedStages) completedStages.add(stage);
+        logger.info(`Resuming from checkpoint — ${completedStages.size} stage(s) already completed`);
+      }
+    }
 
-    const rankedIssues = await ui.task({
-      title: issueTarget ? 'Loading target issue' : 'Ranking contribution opportunities',
-      doneMessage: 'Opportunity ranking complete',
-      failedMessage: 'Opportunity ranking failed',
-      tone: 'info',
-    }, async (task) => issueTarget
-      ? issueRankingService.loadTargetIssue(config, issueTarget)
+    // ── Scout：搜索 issue（checkpoint 恢复时跳过） ──
+    let rankedIssues: RankedIssue[];
+    await this.initializeClients(config);
+    if (completedStages.has('scout')) {
+      rankedIssues = this.loadCheckpoint()!.rankedIssues;
+    } else {
+      this.renderAgentStage('scout', completedStages, issueTarget
+        ? `Verifying provider access and loading ${issueTarget.repoFullName}#${issueTarget.issueNumber}.`
+        : 'Verifying provider access and loading ranked opportunities.');
+      rankedIssues = await ui.task({
+        title: issueTarget ? 'Loading target issue' : 'Ranking contribution opportunities',
+        doneMessage: 'Opportunity ranking complete',
+        failedMessage: 'Opportunity ranking failed',
+        tone: 'info',
+      }, async (task) => issueTarget
+        ? issueRankingService.loadTargetIssue(config, issueTarget)
       : issueRankingService.loadRankedIssues(config, {
         refresh,
         repoFullName,
         onStatus: (message) => task.setMessage(message),
       }));
+    }
     if (rankedIssues.length === 0) {
       ui.emptyState(
         'OpenMeta Agent',
@@ -190,30 +219,39 @@ export class AgentOrchestrator {
       return;
     }
     completedStages.add('scout');
+    this.saveCheckpoint({ rankedIssues, completedStages: [...completedStages] });
 
-    this.renderAgentStage('select', completedStages, issueTarget
-      ? 'Using the explicitly targeted issue as the contribution target.'
-      : 'Review the top ranked issues and choose the next contribution target.');
-    if (!issueTarget) {
-      this.renderOpportunityList('Top ranked opportunities', rankedIssues.slice(0, 5));
+    // ── Select：选择目标（checkpoint 恢复时跳过） ──
+    let selectedIssue: RankedIssue | undefined;
+    if (completedStages.has('select')) {
+      selectedIssue = this.loadCheckpoint()?.selectedIssue;
     }
-    const selectedIssue = issueTarget
-      ? rankedIssues[0]
-      : headless
-        ? issueRankingService.selectIssueForAutomation(rankedIssues, config.automation.minMatchScore)
-        : await this.promptForIssue(rankedIssues);
-
     if (!selectedIssue) {
-      ui.emptyState(
-        'OpenMeta Agent',
-        issueTarget ? 'Target issue could not be selected' : 'No issue met the automation threshold',
-        issueTarget
-          ? 'OpenMeta could not select the specified target issue after scoring.'
-          : `Top opportunities were below ${config.automation.minMatchScore}/100. Lower the threshold or widen your profile.`,
-      );
-      return;
+      this.renderAgentStage('select', completedStages, issueTarget
+        ? 'Using the explicitly targeted issue as the contribution target.'
+        : 'Review the top ranked issues and choose the next contribution target.');
+      if (!issueTarget) {
+        this.renderOpportunityList('Top ranked opportunities', rankedIssues.slice(0, 5));
+      }
+      selectedIssue = issueTarget
+        ? rankedIssues[0]
+        : headless
+          ? issueRankingService.selectIssueForAutomation(rankedIssues, config.automation.minMatchScore)
+          : await this.promptForIssue(rankedIssues);
+
+      if (!selectedIssue) {
+        ui.emptyState(
+          'OpenMeta Agent',
+          issueTarget ? 'Target issue could not be selected' : 'No issue met the automation threshold',
+          issueTarget
+            ? 'OpenMeta could not select the specified target issue after scoring.'
+            : `Top opportunities were below ${config.automation.minMatchScore}/100. Lower the threshold or widen your profile.`,
+        );
+        return;
+      }
+      completedStages.add('select');
+      this.saveCheckpoint({ rankedIssues, selectedIssue, completedStages: [...completedStages] });
     }
-    completedStages.add('select');
     this.showSelectedOpportunity(selectedIssue, headless);
 
     this.renderAgentStage('prepare', completedStages, `Cloning and inspecting ${selectedIssue.repoFullName}.`);
@@ -409,6 +447,7 @@ export class AgentOrchestrator {
       proofMarkdown: finalProofMarkdown,
     });
     completedStages.add('publish');
+    this.clearCheckpoint();
 
     this.showResult({
       issue: selectedIssue,
@@ -1841,6 +1880,38 @@ export class AgentOrchestrator {
       await git.commit('chore: initialize repository', { '--allow-empty': null });
       await git.raw(['push', '--set-upstream', 'origin', defaultBranch]);
     }
+  }
+
+  // ── Checkpoint 断点恢复 ──
+  private getCheckpointPath(): string {
+    return join(ensureDirectory(join(homedir(), '.openmeta', 'state')), CHECKPOINT_FILE);
+  }
+
+  private loadCheckpoint(): AgentCheckpoint | null {
+    try {
+      const path = this.getCheckpointPath();
+      if (!existsSync(path)) return null;
+      const data = JSON.parse(readFileSync(path, 'utf-8'));
+      if (Date.now() - new Date(data.savedAt).getTime() > 60 * 60 * 1000) {
+        try { unlinkSync(path); } catch { /* ok */ }
+        return null;
+      }
+      return data as AgentCheckpoint;
+    } catch { return null; }
+  }
+
+  private saveCheckpoint(data: { rankedIssues: RankedIssue[]; selectedIssue?: RankedIssue; completedStages: AgentStageId[] }): void {
+    try {
+      const checkpoint: AgentCheckpoint = { ...data, savedAt: new Date().toISOString() };
+      writeFileSync(this.getCheckpointPath(), JSON.stringify(checkpoint, null, 2), 'utf-8');
+    } catch { /* 非致命 */ }
+  }
+
+  private clearCheckpoint(): void {
+    try {
+      const path = this.getCheckpointPath();
+      if (existsSync(path)) unlinkSync(path);
+    } catch { /* ok */ }
   }
 }
 
