@@ -43,6 +43,7 @@ export class IssueRankingService {
       refresh: options.refresh,
       repoFullName: options.repoFullName,
       onStatus: options.onStatus,
+      techStack: config.userProfile.techStack,
     });
     const rankedCandidates = this.rankIssuesForProfile(issues, config.userProfile);
     if (options.localOnly) {
@@ -110,14 +111,26 @@ export class IssueRankingService {
     issues: GitHubIssue[],
     userProfile: AppConfig['userProfile'],
   ): GitHubIssue[] {
-    return [...issues].sort((left, right) => {
-      const scoreDelta = this.scoreIssueForProfile(right, userProfile) - this.scoreIssueForProfile(left, userProfile);
-      if (scoreDelta !== 0) {
-        return scoreDelta;
-      }
+    const repoOrder = new Map<string, number>();
 
-      return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime();
-    });
+    return [...issues]
+      .map((issue) => {
+        const repoIdx = repoOrder.get(issue.repoFullName) ?? 0;
+        repoOrder.set(issue.repoFullName, repoIdx + 1);
+        const sameRepoPenalty = repoIdx >= 2 ? 20 : repoIdx >= 1 ? 10 : 0;
+        return {
+          issue,
+          score: Math.max(0, this.scoreIssueForProfile(issue, userProfile) - sameRepoPenalty),
+        };
+      })
+      .sort((left, right) => {
+        const scoreDelta = right.score - left.score;
+        if (scoreDelta !== 0) {
+          return scoreDelta;
+        }
+        return new Date(right.issue.updatedAt).getTime() - new Date(left.issue.updatedAt).getTime();
+      })
+      .map((entry) => entry.issue);
   }
 
   selectIssueForAutomation(issues: RankedIssue[], minOverallScore: number): RankedIssue | undefined {
@@ -226,6 +239,34 @@ export class IssueRankingService {
     score += this.computeDiscoveryFreshnessBoost(issue.updatedAt);
     score += Math.min(12, Math.log10(issue.repoStars + 10) * 5);
 
+    // Quality penalties
+    if (issue.body.trim().length < 50) {
+      score -= 10;
+    }
+    if (this.hasOnlyTitleBody(issue)) {
+      score -= 6;
+    }
+
+    // Penalize stale issues — a >1yr old issue is almost certainly unmaintained
+    const ageDays = (Date.now() - new Date(issue.updatedAt).getTime()) / (1000 * 60 * 60 * 24);
+    if (ageDays > 365) {
+      score -= 35;
+    } else if (ageDays > 180) {
+      score -= 25;
+    } else if (ageDays > 90) {
+      score -= 12;
+    }
+
+    // Bonus for well-structured bug reports
+    if (/\b(expected behavior|actual behavior|steps to reproduce|reproduction steps)\b/i.test(issue.body)) {
+      score += 8;
+    }
+
+    // Bonus for issues with code snippets (concrete context)
+    if (/```[\s\S]*?```/.test(issue.body)) {
+      score += 5;
+    }
+
     return score;
   }
 
@@ -272,6 +313,11 @@ export class IssueRankingService {
     const content = `${issue.title}\n${issue.body}`;
     return /(?:^|[\s`'"])(?:[\w.-]+\/)+[\w.-]+\.(?:ts|tsx|js|jsx|py|go|rs|java|kt|json|md|css|scss)/m.test(content) ||
       /\b(repro|steps? to reproduce|expected|actual|acceptance criteria|stack trace)\b/i.test(content);
+  }
+
+  private hasOnlyTitleBody(issue: GitHubIssue): boolean {
+    const cleaned = issue.body.trim().replace(/^#{1,6}\s+.+$/gm, '').trim();
+    return cleaned.length < 30;
   }
 
   private computeDiscoveryFreshnessBoost(updatedAt: string): number {

@@ -195,13 +195,16 @@ export class AgentOrchestrator {
       ? 'Using the explicitly targeted issue as the contribution target.'
       : 'Review the top ranked issues and choose the next contribution target.');
     if (!issueTarget) {
-      this.renderOpportunityList('Top ranked opportunities', rankedIssues.slice(0, 5));
+      const displayIssues = issueRankingService.diversifyScoutIssues(rankedIssues, 5);
+      this.renderOpportunityList('Top ranked opportunities', displayIssues);
     }
     const selectedIssue = issueTarget
       ? rankedIssues[0]
       : headless
         ? issueRankingService.selectIssueForAutomation(rankedIssues, config.automation.minMatchScore)
-        : await this.promptForIssue(rankedIssues);
+        : await this.promptForIssue(
+          issueRankingService.diversifyScoutIssues(rankedIssues, 5),
+        );
 
     if (!selectedIssue) {
       ui.emptyState(

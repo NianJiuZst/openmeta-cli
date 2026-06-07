@@ -26,6 +26,8 @@ const MAX_PAGINATION_RETRIES = 3;
 const MAX_SEARCH_PAGES = 4;
 const SEARCH_PAGE_PACING_DELAY_MS = 3_000;
 const RATE_LIMIT_RETRY_FALLBACK_DELAY_MS = 10_000;
+const MAX_ISSUES_PER_REPO = 3;
+const MIN_REPO_STARS = 50;
 
 type SearchIssueItem =
   RestEndpointMethodTypes['search']['issuesAndPullRequests']['response']['data']['items'][number];
@@ -56,6 +58,7 @@ interface IssueDiscoveryOptions {
   refresh?: boolean;
   repoFullName?: string;
   onStatus?: (message: string) => void;
+  techStack?: string[];
 }
 
 export class GitHubService {
@@ -112,7 +115,31 @@ export class GitHubService {
     const seenIssueKeys = new Set<string>();
     const candidateItems: SearchIssueItem[] = [];
     const repoCache = new Map<string, RepoMetadata>();
+    const repoIssueCounts = new Map<string, number>();
     const failures: SearchFailure[] = [];
+
+    const collectCandidate = (item: SearchIssueItem): boolean => {
+      if (!this.shouldIncludeIssue(item)) {
+        return false;
+      }
+
+      const repoId = this.parseRepositoryUrl(item.repository_url);
+      const issueKey = `${repoId.fullName}#${item.number}`;
+
+      if (seenIssueKeys.has(issueKey)) {
+        return false;
+      }
+
+      const repoCount = repoIssueCounts.get(repoId.fullName) ?? 0;
+      if (repoCount >= MAX_ISSUES_PER_REPO) {
+        return false;
+      }
+
+      seenIssueKeys.add(issueKey);
+      repoIssueCounts.set(repoId.fullName, repoCount + 1);
+      candidateItems.push(item);
+      return true;
+    };
 
     try {
       if (repoFullName) {
@@ -125,19 +152,7 @@ export class GitHubService {
           logger.debug(`Fetched ${items.length} total results for "${repoFullName}"`);
 
           for (const item of items) {
-            if (!this.shouldIncludeIssue(item)) {
-              continue;
-            }
-
-            const repoId = this.parseRepositoryUrl(item.repository_url);
-            const issueKey = `${repoId.fullName}#${item.number}`;
-
-            if (seenIssueKeys.has(issueKey)) {
-              continue;
-            }
-
-            seenIssueKeys.add(issueKey);
-            candidateItems.push(item);
+            collectCandidate(item);
           }
         } catch (error) {
           const failure = this.describeSearchFailure(error);
@@ -146,34 +161,40 @@ export class GitHubService {
           options.onStatus?.('GitHub search is being stubborn, but OpenMeta is still pulling together the best issue set it can.');
         }
       } else {
-        for (const labelGroup of FILTER_LABEL_GROUPS) {
-          try {
-            const searchQuery = this.buildSearchQuery(labelGroup);
-            options.onStatus?.(this.buildSearchStatusMessage(labelGroup));
-            const items = await this.paginateSearchWithRetry(searchQuery, labelGroup, options.onStatus);
+        const searchGroups: Array<{ query: string; label: string }> = [];
 
-            logger.debug(`Search query: ${searchQuery}`);
-            logger.debug(`Fetched ${items.length} total results for "${labelGroup.join(' / ')}"`);
+        for (const labelGroup of FILTER_LABEL_GROUPS) {
+          searchGroups.push({
+            query: this.buildSearchQuery(labelGroup),
+            label: labelGroup.join(' / '),
+          });
+        }
+
+        if (options.techStack && options.techStack.length > 0) {
+          const techQuery = this.buildTechSearchQuery(options.techStack);
+          if (techQuery) {
+            searchGroups.push({
+              query: techQuery,
+              label: `${options.techStack.slice(0, 3).join(' / ')} (tech match)`,
+            });
+          }
+        }
+
+        for (const group of searchGroups) {
+          try {
+            options.onStatus?.(this.buildSearchStatusMessage([group.label]));
+            const items = await this.paginateSearchWithRetry(group.query, [group.label], options.onStatus);
+
+            logger.debug(`Search query: ${group.query}`);
+            logger.debug(`Fetched ${items.length} total results for "${group.label}"`);
 
             for (const item of items) {
-              if (!this.shouldIncludeIssue(item)) {
-                continue;
-              }
-
-              const repoId = this.parseRepositoryUrl(item.repository_url);
-              const issueKey = `${repoId.fullName}#${item.number}`;
-
-              if (seenIssueKeys.has(issueKey)) {
-                continue;
-              }
-
-              seenIssueKeys.add(issueKey);
-              candidateItems.push(item);
+              collectCandidate(item);
             }
           } catch (error) {
             const failure = this.describeSearchFailure(error);
-            failures.push({ labelGroup, ...failure });
-            logger.debug(`Issue search failed for labels "${labelGroup.join('" / "')}". ${failure.reason}`);
+            failures.push({ labelGroup: [group.label], ...failure });
+            logger.debug(`Issue search failed for "${group.label}". ${failure.reason}`);
             options.onStatus?.('GitHub search is being stubborn, but OpenMeta is still pulling together the best issue set it can.');
           }
         }
@@ -190,6 +211,12 @@ export class GitHubService {
       for (const item of candidateItems) {
         const repoId = this.parseRepositoryUrl(item.repository_url);
         const repoData = await this.fetchRepoMetadata(repoId, repoCache);
+
+        // Post-fetch quality gate: GitHub issue search does not support the
+        // `stars:` qualifier, so we filter by repo stars after resolving metadata.
+        if (repoData.stars < MIN_REPO_STARS) {
+          continue;
+        }
 
         issues.push({
           id: item.id,
@@ -287,6 +314,22 @@ export class GitHubService {
 
   private buildRepositorySearchQuery(repoFullName: string): string {
     return `repo:${repoFullName} archived:false is:issue is:open no:assignee`;
+  }
+
+  private buildTechSearchQuery(techTerms: string[]): string {
+    const joinedLabels = FILTER_LABEL_GROUPS
+      .flat()
+      .map((label) => `label:"${label}"`)
+      .join(' OR ');
+    const joinedTech = techTerms
+      .slice(0, 3)
+      .map((term) => term.toLowerCase().replace(/[^a-z0-9+#]/g, ' ').trim())
+      .filter(Boolean)
+      .join(' OR ');
+    if (!joinedTech) {
+      return '';
+    }
+    return `(${joinedLabels}) (${joinedTech}) archived:false is:issue is:open no:assignee`;
   }
 
   private shouldIncludeIssue(item: SearchIssueItem): boolean {
