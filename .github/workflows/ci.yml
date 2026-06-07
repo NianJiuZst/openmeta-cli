@@ -21,6 +21,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Lint and format check
+        run: bunx biome check
+
       - name: Typecheck
         run: bunx tsc --noEmit
 

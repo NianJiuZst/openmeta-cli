@@ -1,16 +1,26 @@
-export { githubService, GitHubService } from './github.js';
-export { llmService, LLMService } from './llm.js';
-export { contentService, ContentService } from './content.js';
-export { gitService, GitService } from './git.js';
-export { contributionPrService, ContributionPrService } from './contribution-pr.js';
-export { schedulerService, SchedulerService } from './scheduler.js';
-export { opportunityService, OpportunityService } from './opportunity.js';
-export { issueRankingService, IssueRankingService } from './issue-ranking.js';
-export { memoryService, MemoryService } from './memory.js';
-export { inboxService, InboxService } from './inbox.js';
-export { proofOfWorkService, ProofOfWorkService } from './proof-of-work.js';
-export { workspaceService, WorkspaceService } from './workspace.js';
-export { runHistoryService, RunHistoryService } from './run-history.js';
-export { LLM_PROVIDER_PRESETS, findLLMProviderPreset, type LLMProviderPreset } from './llm.providers.js';
-export { SCORING_PRESETS, DEFAULT_SCORING, getPreset, normalizeWeights, normalizeOverallWeights } from './scoring-presets.js';
+export { ContentService, contentService } from './content.js';
+export { ContributionPrService, contributionPrService } from './contribution-pr.js';
+export { GitService, gitService } from './git.js';
+export { GitHubService, githubService } from './github.js';
+export { InboxService, inboxService } from './inbox.js';
+export { IssueRankingService, issueRankingService } from './issue-ranking.js';
+export { LLMService, llmService } from './llm.js';
+export {
+	findLLMProviderPreset,
+	LLM_PROVIDER_PRESETS,
+	type LLMProviderPreset,
+} from './llm.providers.js';
+export { MemoryService, memoryService } from './memory.js';
+export { OpportunityService, opportunityService } from './opportunity.js';
+export { ProofOfWorkService, proofOfWorkService } from './proof-of-work.js';
+export { RunHistoryService, runHistoryService } from './run-history.js';
 export type { SchedulerSyncResult } from './scheduler.js';
+export { SchedulerService, schedulerService } from './scheduler.js';
+export {
+	DEFAULT_SCORING,
+	getPreset,
+	normalizeOverallWeights,
+	normalizeWeights,
+	SCORING_PRESETS,
+} from './scoring-presets.js';
+export { WorkspaceService, workspaceService } from './workspace.js';

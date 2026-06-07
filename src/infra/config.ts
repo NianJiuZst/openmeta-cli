@@ -1,285 +1,294 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
-import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
 import type { AppConfig } from '../types/index.js';
 import { CryptoService } from './crypto.js';
-import { logger } from './logger.js';
 import { DEFAULT_LLM_REASONING_EFFORT, parseLLMReasoningEffort } from './llm-reasoning.js';
+import { logger } from './logger.js';
 
 function getConfigDirPath(): string {
-  return process.env['OPENMETA_CONFIG_DIR'] || join(homedir(), '.config', 'openmeta');
+	return process.env['OPENMETA_CONFIG_DIR'] || join(homedir(), '.config', 'openmeta');
 }
 
 function getConfigFilePath(): string {
-  return join(getConfigDirPath(), 'config.json');
+	return join(getConfigDirPath(), 'config.json');
 }
 
 function getDefaultSchedulerProvider(): AppConfig['automation']['scheduler'] {
-  if (process.platform === 'darwin') {
-    return 'launchd';
-  }
+	if (process.platform === 'darwin') {
+		return 'launchd';
+	}
 
-  if (process.platform === 'linux') {
-    return 'cron';
-  }
+	if (process.platform === 'linux') {
+		return 'cron';
+	}
 
-  return 'manual';
+	return 'manual';
 }
 
 function createDefaultConfig(): AppConfig {
-  return {
-    userProfile: {
-      techStack: [],
-      proficiency: 'beginner',
-      focusAreas: [],
-    },
-    github: {
-      pat: '',
-      username: '',
-      targetRepoPath: '',
-    },
-    llm: {
-      provider: 'openai',
-      apiBaseUrl: 'https://api.openai.com/v1',
-      apiKey: '',
-      modelName: 'gpt-4o-mini',
-      apiHeaders: {},
-      reasoningEffort: DEFAULT_LLM_REASONING_EFFORT,
-      stream: false,
-      activeProfile: '',
-      profiles: {},
-    },
-    automation: {
-      enabled: false,
-      scheduleTime: '09:00',
-      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
-      contentType: 'research_note',
-      scheduler: getDefaultSchedulerProvider(),
-      minMatchScore: 70,
-      skipIfAlreadyGeneratedToday: true,
-    },
-    scoring: {
-      weights: {
-        freshness: 0.25,
-        onboardingClarity: 0.25,
-        mergePotential: 0.30,
-        impact: 0.20,
-        riskPenalty: 0.35,
-      },
-      overallWeights: {
-        technicalMatch: 0.45,
-        opportunityScore: 0.55,
-      },
-      preset: 'balanced',
-    },
-    commitTemplate: 'feat(daily): {{title}}\n\n{{content}}',
-  };
+	return {
+		userProfile: {
+			techStack: [],
+			proficiency: 'beginner',
+			focusAreas: [],
+		},
+		github: {
+			pat: '',
+			username: '',
+			targetRepoPath: '',
+		},
+		llm: {
+			provider: 'openai',
+			apiBaseUrl: 'https://api.openai.com/v1',
+			apiKey: '',
+			modelName: 'gpt-4o-mini',
+			apiHeaders: {},
+			reasoningEffort: DEFAULT_LLM_REASONING_EFFORT,
+			stream: false,
+			activeProfile: '',
+			profiles: {},
+		},
+		automation: {
+			enabled: false,
+			scheduleTime: '09:00',
+			timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+			contentType: 'research_note',
+			scheduler: getDefaultSchedulerProvider(),
+			minMatchScore: 70,
+			skipIfAlreadyGeneratedToday: true,
+		},
+		scoring: {
+			weights: {
+				freshness: 0.25,
+				onboardingClarity: 0.25,
+				mergePotential: 0.3,
+				impact: 0.2,
+				riskPenalty: 0.35,
+			},
+			overallWeights: {
+				technicalMatch: 0.45,
+				opportunityScore: 0.55,
+			},
+			preset: 'balanced',
+		},
+		commitTemplate: 'feat(daily): {{title}}\n\n{{content}}',
+	};
 }
 
 export class ConfigService {
-  private config: AppConfig | null = null;
+	private config: AppConfig | null = null;
 
-  async load(): Promise<AppConfig> {
-    const configFilePath = getConfigFilePath();
+	async load(): Promise<AppConfig> {
+		const configFilePath = getConfigFilePath();
 
-    if (this.config) {
-      return this.config;
-    }
+		if (this.config) {
+			return this.config;
+		}
 
-    if (existsSync(configFilePath)) {
-      try {
-        const fileContent = readFileSync(configFilePath, 'utf-8');
-        const parsedConfig = JSON.parse(fileContent) as Partial<AppConfig>;
-        this.config = this.normalizeConfig(this.decryptConfig(parsedConfig));
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        logger.error(`Failed to load config from ${configFilePath}: ${message}`);
-        throw new Error(`Unable to load OpenMeta configuration. See ${configFilePath} for details.`);
-      }
-    } else {
-      this.config = createDefaultConfig();
-    }
+		if (existsSync(configFilePath)) {
+			try {
+				const fileContent = readFileSync(configFilePath, 'utf-8');
+				const parsedConfig = JSON.parse(fileContent) as Partial<AppConfig>;
+				this.config = this.normalizeConfig(this.decryptConfig(parsedConfig));
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				logger.error(`Failed to load config from ${configFilePath}: ${message}`);
+				throw new Error(
+					`Unable to load OpenMeta configuration. See ${configFilePath} for details.`,
+				);
+			}
+		} else {
+			this.config = createDefaultConfig();
+		}
 
-    return this.config;
-  }
+		return this.config;
+	}
 
-  async save(config: AppConfig): Promise<void> {
-    const configDirPath = getConfigDirPath();
-    const configFilePath = getConfigFilePath();
+	async save(config: AppConfig): Promise<void> {
+		const configDirPath = getConfigDirPath();
+		const configFilePath = getConfigFilePath();
 
-    if (!existsSync(configDirPath)) {
-      mkdirSync(configDirPath, { recursive: true });
-    }
+		if (!existsSync(configDirPath)) {
+			mkdirSync(configDirPath, { recursive: true });
+		}
 
-    const encryptedConfig = this.encryptConfig(config);
-    writeFileSync(configFilePath, JSON.stringify(encryptedConfig, null, 2), 'utf-8');
-    this.config = config;
-    logger.success('Configuration saved successfully');
-  }
+		const encryptedConfig = this.encryptConfig(config);
+		writeFileSync(configFilePath, JSON.stringify(encryptedConfig, null, 2), 'utf-8');
+		this.config = config;
+		logger.success('Configuration saved successfully');
+	}
 
-  async get(): Promise<AppConfig> {
-    if (!this.config) {
-      return this.load();
-    }
-    return this.config;
-  }
+	async get(): Promise<AppConfig> {
+		if (!this.config) {
+			return this.load();
+		}
+		return this.config;
+	}
 
-  async update(partial: Partial<AppConfig>): Promise<AppConfig> {
-    const current = await this.get();
-    const updated: AppConfig = {
-      ...current,
-      ...partial,
-      userProfile: { ...current.userProfile, ...partial.userProfile },
-      github: { ...current.github, ...partial.github },
-      llm: { ...current.llm, ...partial.llm },
-      automation: { ...current.automation, ...partial.automation },
-    };
-    await this.save(updated);
-    return updated;
-  }
+	async update(partial: Partial<AppConfig>): Promise<AppConfig> {
+		const current = await this.get();
+		const updated: AppConfig = {
+			...current,
+			...partial,
+			userProfile: { ...current.userProfile, ...partial.userProfile },
+			github: { ...current.github, ...partial.github },
+			llm: { ...current.llm, ...partial.llm },
+			automation: { ...current.automation, ...partial.automation },
+		};
+		await this.save(updated);
+		return updated;
+	}
 
-  async reset(): Promise<void> {
-    const configFilePath = getConfigFilePath();
+	async reset(): Promise<void> {
+		const configFilePath = getConfigFilePath();
 
-    if (existsSync(configFilePath)) {
-      const backupPath = `${configFilePath}.backup`;
-      const currentContent = readFileSync(configFilePath, 'utf-8');
-      writeFileSync(backupPath, currentContent, 'utf-8');
-      logger.info(`Backup created at ${backupPath}`);
-    }
-    await this.save(createDefaultConfig());
-    logger.success('Configuration reset to defaults');
-  }
+		if (existsSync(configFilePath)) {
+			const backupPath = `${configFilePath}.backup`;
+			const currentContent = readFileSync(configFilePath, 'utf-8');
+			writeFileSync(backupPath, currentContent, 'utf-8');
+			logger.info(`Backup created at ${backupPath}`);
+		}
+		await this.save(createDefaultConfig());
+		logger.success('Configuration reset to defaults');
+	}
 
-  private encryptConfig(config: AppConfig): AppConfig {
-    const encrypted = this.normalizeConfig(config);
-    if (encrypted.github.pat) {
-      encrypted.github = { ...encrypted.github, pat: CryptoService.encrypt(encrypted.github.pat) };
-    }
-    if (encrypted.llm.apiKey) {
-      encrypted.llm = { ...encrypted.llm, apiKey: CryptoService.encrypt(encrypted.llm.apiKey) };
-    }
-    encrypted.llm = {
-      ...encrypted.llm,
-      profiles: this.encryptProviderProfiles(encrypted.llm.profiles),
-    };
-    return encrypted;
-  }
+	private encryptConfig(config: AppConfig): AppConfig {
+		const encrypted = this.normalizeConfig(config);
+		if (encrypted.github.pat) {
+			encrypted.github = { ...encrypted.github, pat: CryptoService.encrypt(encrypted.github.pat) };
+		}
+		if (encrypted.llm.apiKey) {
+			encrypted.llm = { ...encrypted.llm, apiKey: CryptoService.encrypt(encrypted.llm.apiKey) };
+		}
+		encrypted.llm = {
+			...encrypted.llm,
+			profiles: this.encryptProviderProfiles(encrypted.llm.profiles),
+		};
+		return encrypted;
+	}
 
-  private decryptConfig(config: Partial<AppConfig>): AppConfig {
-    const decrypted = this.normalizeConfig(config);
-    if (decrypted.github.pat && CryptoService.isEncrypted(decrypted.github.pat)) {
-      decrypted.github = { ...decrypted.github, pat: CryptoService.decrypt(decrypted.github.pat) };
-    }
-    if (decrypted.llm.apiKey && CryptoService.isEncrypted(decrypted.llm.apiKey)) {
-      decrypted.llm = { ...decrypted.llm, apiKey: CryptoService.decrypt(decrypted.llm.apiKey) };
-    }
-    decrypted.llm = {
-      ...decrypted.llm,
-      profiles: this.decryptProviderProfiles(decrypted.llm.profiles),
-    };
-    return decrypted;
-  }
+	private decryptConfig(config: Partial<AppConfig>): AppConfig {
+		const decrypted = this.normalizeConfig(config);
+		if (decrypted.github.pat && CryptoService.isEncrypted(decrypted.github.pat)) {
+			decrypted.github = { ...decrypted.github, pat: CryptoService.decrypt(decrypted.github.pat) };
+		}
+		if (decrypted.llm.apiKey && CryptoService.isEncrypted(decrypted.llm.apiKey)) {
+			decrypted.llm = { ...decrypted.llm, apiKey: CryptoService.decrypt(decrypted.llm.apiKey) };
+		}
+		decrypted.llm = {
+			...decrypted.llm,
+			profiles: this.decryptProviderProfiles(decrypted.llm.profiles),
+		};
+		return decrypted;
+	}
 
-  getConfigPath(): string {
-    return getConfigFilePath();
-  }
+	getConfigPath(): string {
+		return getConfigFilePath();
+	}
 
-  private normalizeConfig(config: Partial<AppConfig>): AppConfig {
-    const defaults = createDefaultConfig();
+	private normalizeConfig(config: Partial<AppConfig>): AppConfig {
+		const defaults = createDefaultConfig();
 
-    return {
-      ...defaults,
-      ...config,
-      userProfile: {
-        ...defaults.userProfile,
-        ...config.userProfile,
-      },
-      github: {
-        ...defaults.github,
-        ...config.github,
-      },
-      llm: {
-        ...defaults.llm,
-        ...config.llm,
-        apiHeaders: {
-          ...defaults.llm.apiHeaders,
-          ...config.llm?.apiHeaders,
-        },
-        reasoningEffort: this.normalizeReasoningEffort(config.llm?.reasoningEffort),
-        stream: config.llm?.stream === true,
-        profiles: this.normalizeProviderProfiles(config.llm?.profiles),
-      },
-      automation: {
-        ...defaults.automation,
-        ...config.automation,
-      },
-      scoring: {
-        ...defaults.scoring,
-        ...config.scoring,
-        weights: {
-          ...defaults.scoring.weights,
-          ...config.scoring?.weights,
-        },
-        overallWeights: {
-          ...defaults.scoring.overallWeights,
-          ...config.scoring?.overallWeights,
-        },
-      },
-    };
-  }
+		return {
+			...defaults,
+			...config,
+			userProfile: {
+				...defaults.userProfile,
+				...config.userProfile,
+			},
+			github: {
+				...defaults.github,
+				...config.github,
+			},
+			llm: {
+				...defaults.llm,
+				...config.llm,
+				apiHeaders: {
+					...defaults.llm.apiHeaders,
+					...config.llm?.apiHeaders,
+				},
+				reasoningEffort: this.normalizeReasoningEffort(config.llm?.reasoningEffort),
+				stream: config.llm?.stream === true,
+				profiles: this.normalizeProviderProfiles(config.llm?.profiles),
+			},
+			automation: {
+				...defaults.automation,
+				...config.automation,
+			},
+			scoring: {
+				...defaults.scoring,
+				...config.scoring,
+				weights: {
+					...defaults.scoring.weights,
+					...config.scoring?.weights,
+				},
+				overallWeights: {
+					...defaults.scoring.overallWeights,
+					...config.scoring?.overallWeights,
+				},
+			},
+		};
+	}
 
-  private encryptProviderProfiles(
-    profiles: AppConfig['llm']['profiles'] = {},
-  ): AppConfig['llm']['profiles'] {
-    return Object.fromEntries(Object.entries(profiles).map(([name, profile]) => [
-      name,
-      {
-        ...profile,
-        apiKey: profile.apiKey ? CryptoService.encrypt(profile.apiKey) : '',
-      },
-    ]));
-  }
+	private encryptProviderProfiles(
+		profiles: AppConfig['llm']['profiles'] = {},
+	): AppConfig['llm']['profiles'] {
+		return Object.fromEntries(
+			Object.entries(profiles).map(([name, profile]) => [
+				name,
+				{
+					...profile,
+					apiKey: profile.apiKey ? CryptoService.encrypt(profile.apiKey) : '',
+				},
+			]),
+		);
+	}
 
-  private decryptProviderProfiles(
-    profiles: AppConfig['llm']['profiles'] = {},
-  ): AppConfig['llm']['profiles'] {
-    return Object.fromEntries(Object.entries(profiles).map(([name, profile]) => [
-      name,
-      {
-        ...profile,
-        apiKey: profile.apiKey && CryptoService.isEncrypted(profile.apiKey)
-          ? CryptoService.decrypt(profile.apiKey)
-          : profile.apiKey,
-      },
-    ]));
-  }
+	private decryptProviderProfiles(
+		profiles: AppConfig['llm']['profiles'] = {},
+	): AppConfig['llm']['profiles'] {
+		return Object.fromEntries(
+			Object.entries(profiles).map(([name, profile]) => [
+				name,
+				{
+					...profile,
+					apiKey:
+						profile.apiKey && CryptoService.isEncrypted(profile.apiKey)
+							? CryptoService.decrypt(profile.apiKey)
+							: profile.apiKey,
+				},
+			]),
+		);
+	}
 
-  private normalizeReasoningEffort(value: unknown): AppConfig['llm']['reasoningEffort'] {
-    if (typeof value !== 'string' || value.trim().length === 0) {
-      return DEFAULT_LLM_REASONING_EFFORT;
-    }
+	private normalizeReasoningEffort(value: unknown): AppConfig['llm']['reasoningEffort'] {
+		if (typeof value !== 'string' || value.trim().length === 0) {
+			return DEFAULT_LLM_REASONING_EFFORT;
+		}
 
-    try {
-      return parseLLMReasoningEffort(value);
-    } catch {
-      return DEFAULT_LLM_REASONING_EFFORT;
-    }
-  }
+		try {
+			return parseLLMReasoningEffort(value);
+		} catch {
+			return DEFAULT_LLM_REASONING_EFFORT;
+		}
+	}
 
-  private normalizeProviderProfiles(
-    profiles: AppConfig['llm']['profiles'] = {},
-  ): AppConfig['llm']['profiles'] {
-    return Object.fromEntries(Object.entries(profiles).map(([name, profile]) => [
-      name,
-      {
-        ...profile,
-        apiHeaders: profile.apiHeaders ?? {},
-        reasoningEffort: this.normalizeReasoningEffort(profile.reasoningEffort),
-        stream: profile.stream === true,
-      },
-    ]));
-  }
+	private normalizeProviderProfiles(
+		profiles: AppConfig['llm']['profiles'] = {},
+	): AppConfig['llm']['profiles'] {
+		return Object.fromEntries(
+			Object.entries(profiles).map(([name, profile]) => [
+				name,
+				{
+					...profile,
+					apiHeaders: profile.apiHeaders ?? {},
+					reasoningEffort: this.normalizeReasoningEffort(profile.reasoningEffort),
+					stream: profile.stream === true,
+				},
+			]),
+		);
+	}
 }
 
 export const configService = new ConfigService();

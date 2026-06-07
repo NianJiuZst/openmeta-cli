@@ -1,103 +1,111 @@
 import { describe, expect, test } from 'bun:test';
-import { LLMService } from '../src/services/llm.js';
 import type { StructuredOutputStatus } from '../src/contracts/index.js';
+import { LLMService } from '../src/services/llm.js';
 import type { ImplementationDraft, MatchedIssue } from '../src/types/index.js';
-import { createIssue, createMemory, createRankedIssue, createWorkspace } from './helpers/factories.js';
+import {
+	createIssue,
+	createMemory,
+	createRankedIssue,
+	createWorkspace,
+} from './helpers/factories.js';
 
 interface LLMServiceInternals {
-  validateConnection(): Promise<boolean>;
-  getLastValidationError(): string | null;
-  generatePatchDraft(
-    issue: ReturnType<typeof createRankedIssue>,
-    workspace: ReturnType<typeof createWorkspace>,
-    memory: ReturnType<typeof createMemory>,
-  ): Promise<{
-    status: StructuredOutputStatus;
-    data: {
-      goal: string;
-      targetFiles: Array<{ path: string; reason: string }>;
-      proposedChanges: Array<{ title: string; details: string; files: string[] }>;
-      risks: string[];
-      validationNotes: string[];
-    };
-  }>;
-  analyzeRepository(
-    repoFullName: string,
-    workspace: ReturnType<typeof createWorkspace>,
-    memory: ReturnType<typeof createMemory>,
-  ): Promise<{
-    status: StructuredOutputStatus;
-    data: Array<{
-      id: string;
-      title: string;
-      prPotentialScore: number;
-    }>;
-  }>;
-  client: {
-    chat: {
-      completions: {
-          create: (payload: {
-            model: string;
-            messages: Array<{ role: string; content: string }>;
-            temperature: number;
-            reasoning_effort?: string;
-            stream?: boolean;
-            stream_options?: { include_usage?: boolean };
-          }) => unknown | Promise<unknown>;
-      };
-    };
-  } | null;
-  provider: 'openai' | 'minimax' | 'moonshot' | 'zhipu' | 'custom';
-  parseImplementationDraft(content: string): {
-    status: StructuredOutputStatus;
-    data: ImplementationDraft;
-  };
-  parsePatchDraft(content: string): {
-    status: StructuredOutputStatus;
-    data: {
-      goal: string;
-      targetFiles: Array<{ path: string; reason: string }>;
-      proposedChanges: Array<{ title: string; details: string; files: string[] }>;
-      risks: string[];
-      validationNotes: string[];
-    };
-  };
-  parsePullRequestDraft(content: string): {
-    status: StructuredOutputStatus;
-    data: {
-      title: string;
-      summary: string;
-      changes: string[];
-      validation: string[];
-      risks: string[];
-    };
-  };
-  parseRepositorySuggestions(content: string): {
-    status: StructuredOutputStatus;
-    data: Array<{
-      id: string;
-      title: string;
-      summary: string;
-      rationale: string;
-      targetFiles: Array<{ path: string; reason: string }>;
-      proposedChanges: string[];
-      validationPlan: string[];
-      risks: string[];
-      estimatedWorkload: 'small' | 'medium' | 'large';
-      prPotentialScore: number;
-    }>;
-  };
-  parseLLMResponse(content: string, originalIssues: ReturnType<typeof createIssue>[]): {
-    status: StructuredOutputStatus;
-    data: MatchedIssue[];
-  };
-  formatRepoMemory(memory: ReturnType<typeof createMemory>): string;
+	validateConnection(): Promise<boolean>;
+	getLastValidationError(): string | null;
+	generatePatchDraft(
+		issue: ReturnType<typeof createRankedIssue>,
+		workspace: ReturnType<typeof createWorkspace>,
+		memory: ReturnType<typeof createMemory>,
+	): Promise<{
+		status: StructuredOutputStatus;
+		data: {
+			goal: string;
+			targetFiles: Array<{ path: string; reason: string }>;
+			proposedChanges: Array<{ title: string; details: string; files: string[] }>;
+			risks: string[];
+			validationNotes: string[];
+		};
+	}>;
+	analyzeRepository(
+		repoFullName: string,
+		workspace: ReturnType<typeof createWorkspace>,
+		memory: ReturnType<typeof createMemory>,
+	): Promise<{
+		status: StructuredOutputStatus;
+		data: Array<{
+			id: string;
+			title: string;
+			prPotentialScore: number;
+		}>;
+	}>;
+	client: {
+		chat: {
+			completions: {
+				create: (payload: {
+					model: string;
+					messages: Array<{ role: string; content: string }>;
+					temperature: number;
+					reasoning_effort?: string;
+					stream?: boolean;
+					stream_options?: { include_usage?: boolean };
+				}) => unknown | Promise<unknown>;
+			};
+		};
+	} | null;
+	provider: 'openai' | 'minimax' | 'moonshot' | 'zhipu' | 'custom';
+	parseImplementationDraft(content: string): {
+		status: StructuredOutputStatus;
+		data: ImplementationDraft;
+	};
+	parsePatchDraft(content: string): {
+		status: StructuredOutputStatus;
+		data: {
+			goal: string;
+			targetFiles: Array<{ path: string; reason: string }>;
+			proposedChanges: Array<{ title: string; details: string; files: string[] }>;
+			risks: string[];
+			validationNotes: string[];
+		};
+	};
+	parsePullRequestDraft(content: string): {
+		status: StructuredOutputStatus;
+		data: {
+			title: string;
+			summary: string;
+			changes: string[];
+			validation: string[];
+			risks: string[];
+		};
+	};
+	parseRepositorySuggestions(content: string): {
+		status: StructuredOutputStatus;
+		data: Array<{
+			id: string;
+			title: string;
+			summary: string;
+			rationale: string;
+			targetFiles: Array<{ path: string; reason: string }>;
+			proposedChanges: string[];
+			validationPlan: string[];
+			risks: string[];
+			estimatedWorkload: 'small' | 'medium' | 'large';
+			prPotentialScore: number;
+		}>;
+	};
+	parseLLMResponse(
+		content: string,
+		originalIssues: ReturnType<typeof createIssue>[],
+	): {
+		status: StructuredOutputStatus;
+		data: MatchedIssue[];
+	};
+	formatRepoMemory(memory: ReturnType<typeof createMemory>): string;
 }
 
 describe('LLMService repository suggestion parsing', () => {
-  test('parses structured repository suggestions and keeps the highest scoring duplicate', () => {
-    const service = new LLMService() as unknown as LLMServiceInternals;
-    const suggestions = service.parseRepositorySuggestions(`
+	test('parses structured repository suggestions and keeps the highest scoring duplicate', () => {
+		const service = new LLMService() as unknown as LLMServiceInternals;
+		const suggestions = service.parseRepositorySuggestions(`
       {
         "version": "1",
         "kind": "repository_suggestion_list",
@@ -164,104 +172,126 @@ describe('LLMService repository suggestion parsing', () => {
       }
     `);
 
-    expect(suggestions.status).toBe('success');
-    expect(suggestions.data).toHaveLength(2);
-    expect(suggestions.data[0]?.id).toBe('config-validation');
-    expect(suggestions.data[0]?.targetFiles.map((file) => file.path)).toEqual([
-      'src/infra/config.ts',
-      'test/config.test.ts',
-    ]);
-    expect(suggestions.data[1]?.id).toBe('docs-install');
-    expect(suggestions.data[1]?.summary).toBe('Make setup instructions easier to follow.');
-  });
+		expect(suggestions.status).toBe('success');
+		expect(suggestions.data).toHaveLength(2);
+		expect(suggestions.data[0]?.id).toBe('config-validation');
+		expect(suggestions.data[0]?.targetFiles.map((file) => file.path)).toEqual([
+			'src/infra/config.ts',
+			'test/config.test.ts',
+		]);
+		expect(suggestions.data[1]?.id).toBe('docs-install');
+		expect(suggestions.data[1]?.summary).toBe('Make setup instructions easier to follow.');
+	});
 
-  test('generates repository analysis requests from workspace context', async () => {
-    const service = new LLMService() as unknown as LLMServiceInternals & {
-      initialize(
-        apiKey: string,
-        baseUrl: string,
-        modelName?: string,
-        apiHeaders?: Record<string, string>,
-        provider?: 'openai',
-        reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh',
-        stream?: boolean,
-      ): void;
-    };
-    const payloads: Array<{
-      messages: Array<{ role: string; content: string }>;
-      stream?: boolean;
-      reasoning_effort?: string;
-    }> = [];
+	test('generates repository analysis requests from workspace context', async () => {
+		const service = new LLMService() as unknown as LLMServiceInternals & {
+			initialize(
+				apiKey: string,
+				baseUrl: string,
+				modelName?: string,
+				apiHeaders?: Record<string, string>,
+				provider?: 'openai',
+				reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh',
+				stream?: boolean,
+			): void;
+		};
+		const payloads: Array<{
+			messages: Array<{ role: string; content: string }>;
+			stream?: boolean;
+			reasoning_effort?: string;
+		}> = [];
 
-    service.initialize('sk-test', 'https://api.openai.com/v1', 'gpt-5.5', {}, 'openai', 'high', true);
-    service.client = {
-      chat: {
-        completions: {
-          create: async (payload) => {
-            payloads.push(payload);
-            return {
-              choices: [{
-                message: {
-                  content: JSON.stringify({
-                    version: '1',
-                    kind: 'repository_suggestion_list',
-                    status: 'success',
-                    data: {
-                      suggestions: [
-                        {
-                          id: 'docs-install',
-                          title: 'Document local install',
-                          summary: 'Clarify setup docs.',
-                          rationale: 'README setup is incomplete.',
-                          targetFiles: [{ path: 'README.md', reason: 'Setup docs' }],
-                          proposedChanges: ['Add local install instructions'],
-                          validationPlan: ['Review README commands'],
-                          risks: [],
-                          estimatedWorkload: 'small',
-                          prPotentialScore: 82,
-                        },
-                      ],
-                    },
-                  }),
-                },
-              }],
-            };
-          },
-        },
-      },
-    };
+		service.initialize(
+			'sk-test',
+			'https://api.openai.com/v1',
+			'gpt-5.5',
+			{},
+			'openai',
+			'high',
+			true,
+		);
+		service.client = {
+			chat: {
+				completions: {
+					create: async (payload) => {
+						payloads.push(payload);
+						return {
+							choices: [
+								{
+									message: {
+										content: JSON.stringify({
+											version: '1',
+											kind: 'repository_suggestion_list',
+											status: 'success',
+											data: {
+												suggestions: [
+													{
+														id: 'docs-install',
+														title: 'Document local install',
+														summary: 'Clarify setup docs.',
+														rationale: 'README setup is incomplete.',
+														targetFiles: [{ path: 'README.md', reason: 'Setup docs' }],
+														proposedChanges: ['Add local install instructions'],
+														validationPlan: ['Review README commands'],
+														risks: [],
+														estimatedWorkload: 'small',
+														prPotentialScore: 82,
+													},
+												],
+											},
+										}),
+									},
+								},
+							],
+						};
+					},
+				},
+			},
+		};
 
-    const result = await service.analyzeRepository(
-      'acme/demo',
-      createWorkspace({
-        topLevelFiles: ['README.md', 'package.json', 'src'],
-        candidateFiles: ['README.md', 'src/index.ts'],
-        snippets: [
-          { path: 'README.md', content: '# Demo\n\nInstall instructions are missing.\n' },
-          { path: 'src/index.ts', content: 'export const demo = true;\n' },
-        ],
-        testCommands: [{ command: 'bun test', reason: 'Detected package.json test script (bun)', source: 'repo-script' }],
-        validationCommands: [{ command: 'bun test', reason: 'Detected package.json test script (bun)', source: 'repo-script' }],
-      }),
-      createMemory(),
-    );
+		const result = await service.analyzeRepository(
+			'acme/demo',
+			createWorkspace({
+				topLevelFiles: ['README.md', 'package.json', 'src'],
+				candidateFiles: ['README.md', 'src/index.ts'],
+				snippets: [
+					{ path: 'README.md', content: '# Demo\n\nInstall instructions are missing.\n' },
+					{ path: 'src/index.ts', content: 'export const demo = true;\n' },
+				],
+				testCommands: [
+					{
+						command: 'bun test',
+						reason: 'Detected package.json test script (bun)',
+						source: 'repo-script',
+					},
+				],
+				validationCommands: [
+					{
+						command: 'bun test',
+						reason: 'Detected package.json test script (bun)',
+						source: 'repo-script',
+					},
+				],
+			}),
+			createMemory(),
+		);
 
-    expect(result.data[0]?.title).toBe('Document local install');
-    expect(payloads[0]).toMatchObject({
-      stream: true,
-      reasoning_effort: 'high',
-    });
-    expect(payloads[0]?.messages[1]?.content).toContain('Repository: acme/demo');
-    expect(payloads[0]?.messages[1]?.content).toContain('Candidate Files: README.md, src/index.ts');
-    expect(payloads[0]?.messages[1]?.content).toContain('FILE: README.md');
-    expect(payloads[0]?.messages[1]?.content).toContain('Detected Test Commands: bun test');
-  });
+		expect(result.data[0]?.title).toBe('Document local install');
+		expect(payloads[0]).toMatchObject({
+			stream: true,
+			reasoning_effort: 'high',
+		});
+		expect(payloads[0]?.messages[1]?.content).toContain('Repository: acme/demo');
+		expect(payloads[0]?.messages[1]?.content).toContain('Candidate Files: README.md, src/index.ts');
+		expect(payloads[0]?.messages[1]?.content).toContain('FILE: README.md');
+		expect(payloads[0]?.messages[1]?.content).toContain('Detected Test Commands: bun test');
+	});
 });
 
 describe('LLMService implementation draft parsing', () => {
-  test('parses raw JSON responses into file change drafts', () => {
-    const service = new LLMService() as unknown as LLMServiceInternals;
-    const draft = service.parseImplementationDraft(`
+	test('parses raw JSON responses into file change drafts', () => {
+		const service = new LLMService() as unknown as LLMServiceInternals;
+		const draft = service.parseImplementationDraft(`
       {
         "version": "1",
         "kind": "implementation_draft",
@@ -279,15 +309,16 @@ describe('LLMService implementation draft parsing', () => {
       }
     `);
 
-    expect(draft.status).toBe('success');
-    expect(draft.data.summary).toBe('Update the button label');
-    expect(draft.data.fileChanges).toHaveLength(1);
-    expect(draft.data.fileChanges[0]?.path).toBe('src/button.tsx');
-  });
+		expect(draft.status).toBe('success');
+		expect(draft.data.summary).toBe('Update the button label');
+		expect(draft.data.fileChanges).toHaveLength(1);
+		expect(draft.data.fileChanges[0]?.path).toBe('src/button.tsx');
+	});
 
-  test('rejects fenced JSON responses that fail schema validation', () => {
-    const service = new LLMService() as unknown as LLMServiceInternals;
-    expect(() => service.parseImplementationDraft(`
+	test('rejects fenced JSON responses that fail schema validation', () => {
+		const service = new LLMService() as unknown as LLMServiceInternals;
+		expect(() =>
+			service.parseImplementationDraft(`
       \`\`\`json
       {
         "version": "1",
@@ -310,12 +341,13 @@ describe('LLMService implementation draft parsing', () => {
         }
       }
       \`\`\`
-    `)).toThrow('LLM output failed schema validation.');
-  });
+    `),
+		).toThrow('LLM output failed schema validation.');
+	});
 
-  test('parses fenced JSON responses with raw tsx content', () => {
-    const service = new LLMService() as unknown as LLMServiceInternals;
-    const draft = service.parseImplementationDraft(`
+	test('parses fenced JSON responses with raw tsx content', () => {
+		const service = new LLMService() as unknown as LLMServiceInternals;
+		const draft = service.parseImplementationDraft(`
       \`\`\`json
       {
         "version": "1",
@@ -335,16 +367,16 @@ describe('LLMService implementation draft parsing', () => {
       \`\`\`
     `);
 
-    expect(draft.status).toBe('success');
-    expect(draft.data.summary).toBe('Add aria-label support');
-    expect(draft.data.fileChanges).toHaveLength(1);
-    expect(draft.data.fileChanges[0]?.path).toBe('src/components/IconButton.tsx');
-    expect(draft.data.fileChanges[0]?.content).toContain('aria-label="Open menu"');
-  });
+		expect(draft.status).toBe('success');
+		expect(draft.data.summary).toBe('Add aria-label support');
+		expect(draft.data.fileChanges).toHaveLength(1);
+		expect(draft.data.fileChanges[0]?.path).toBe('src/components/IconButton.tsx');
+		expect(draft.data.fileChanges[0]?.content).toContain('aria-label="Open menu"');
+	});
 
-  test('deduplicates repeated file changes by path and keeps the latest version', () => {
-    const service = new LLMService() as unknown as LLMServiceInternals;
-    const draft = service.parseImplementationDraft(`
+	test('deduplicates repeated file changes by path and keeps the latest version', () => {
+		const service = new LLMService() as unknown as LLMServiceInternals;
+		const draft = service.parseImplementationDraft(`
       {
         "version": "1",
         "kind": "implementation_draft",
@@ -367,324 +399,335 @@ describe('LLMService implementation draft parsing', () => {
       }
     `);
 
-    expect(draft.status).toBe('success');
-    expect(draft.data.fileChanges).toHaveLength(1);
-    expect(draft.data.fileChanges[0]?.reason).toBe('Final attempt');
-    expect(draft.data.fileChanges[0]?.content).toContain('<button />');
-  });
+		expect(draft.status).toBe('success');
+		expect(draft.data.fileChanges).toHaveLength(1);
+		expect(draft.data.fileChanges[0]?.reason).toBe('Final attempt');
+		expect(draft.data.fileChanges[0]?.content).toContain('<button />');
+	});
 
-  test('throws when implementation output is not parseable', () => {
-    const service = new LLMService() as unknown as LLMServiceInternals;
-    expect(() => service.parseImplementationDraft('unstructured output')).toThrow(
-      'LLM did not return a parseable JSON object.',
-    );
-  });
+	test('throws when implementation output is not parseable', () => {
+		const service = new LLMService() as unknown as LLMServiceInternals;
+		expect(() => service.parseImplementationDraft('unstructured output')).toThrow(
+			'LLM did not return a parseable JSON object.',
+		);
+	});
 });
 
 describe('LLMService validation behavior', () => {
-  test('requires an OpenAI-compatible payload for custom providers', async () => {
-    const service = new LLMService() as unknown as LLMServiceInternals;
-    service.provider = 'custom';
-    service.client = {
-      chat: {
-        completions: {
-          create: async () => '<!doctype html><html></html>',
-        },
-      },
-    };
+	test('requires an OpenAI-compatible payload for custom providers', async () => {
+		const service = new LLMService() as unknown as LLMServiceInternals;
+		service.provider = 'custom';
+		service.client = {
+			chat: {
+				completions: {
+					create: async () => '<!doctype html><html></html>',
+				},
+			},
+		};
 
-    const valid = await service.validateConnection();
+		const valid = await service.validateConnection();
 
-    expect(valid).toBe(false);
-    expect(service.getLastValidationError()).toContain('did not match the expected OpenAI-compatible format');
-  });
+		expect(valid).toBe(false);
+		expect(service.getLastValidationError()).toContain(
+			'did not match the expected OpenAI-compatible format',
+		);
+	});
 
-  test('accepts exact OK replies for custom providers', async () => {
-    const service = new LLMService() as unknown as LLMServiceInternals;
-    service.provider = 'custom';
-    service.client = {
-      chat: {
-        completions: {
-          create: async () => ({
-            choices: [{ message: { content: 'OK' } }],
-          }),
-        },
-      },
-    };
+	test('accepts exact OK replies for custom providers', async () => {
+		const service = new LLMService() as unknown as LLMServiceInternals;
+		service.provider = 'custom';
+		service.client = {
+			chat: {
+				completions: {
+					create: async () => ({
+						choices: [{ message: { content: 'OK' } }],
+					}),
+				},
+			},
+		};
 
-    const valid = await service.validateConnection();
-    expect(valid).toBe(true);
-  });
+		const valid = await service.validateConnection();
+		expect(valid).toBe(true);
+	});
 
-  test('accepts non-empty assistant replies for custom providers', async () => {
-    const service = new LLMService() as unknown as LLMServiceInternals;
-    service.provider = 'custom';
-    service.client = {
-      chat: {
-        completions: {
-          create: async () => ({
-            choices: [{ message: { content: 'Validation passed.' } }],
-          }),
-        },
-      },
-    };
+	test('accepts non-empty assistant replies for custom providers', async () => {
+		const service = new LLMService() as unknown as LLMServiceInternals;
+		service.provider = 'custom';
+		service.client = {
+			chat: {
+				completions: {
+					create: async () => ({
+						choices: [{ message: { content: 'Validation passed.' } }],
+					}),
+				},
+			},
+		};
 
-    const valid = await service.validateConnection();
-    expect(valid).toBe(true);
-  });
+		const valid = await service.validateConnection();
+		expect(valid).toBe(true);
+	});
 
-  test('keeps existing lenient validation for built-in providers', async () => {
-    const service = new LLMService() as unknown as LLMServiceInternals;
-    service.provider = 'openai';
-    service.client = {
-      chat: {
-        completions: {
-          create: async () => '<!doctype html><html></html>',
-        },
-      },
-    };
+	test('keeps existing lenient validation for built-in providers', async () => {
+		const service = new LLMService() as unknown as LLMServiceInternals;
+		service.provider = 'openai';
+		service.client = {
+			chat: {
+				completions: {
+					create: async () => '<!doctype html><html></html>',
+				},
+			},
+		};
 
-    const valid = await service.validateConnection();
-    expect(valid).toBe(true);
-  });
+		const valid = await service.validateConnection();
+		expect(valid).toBe(true);
+	});
 
-  test('uses streaming validation requests when streaming is enabled', async () => {
-    const service = new LLMService() as unknown as LLMServiceInternals & {
-      initialize(
-        apiKey: string,
-        baseUrl: string,
-        modelName?: string,
-        apiHeaders?: Record<string, string>,
-        provider?: 'custom',
-        reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh',
-        stream?: boolean,
-      ): void;
-    };
-    const payloads: Array<Record<string, unknown>> = [];
+	test('uses streaming validation requests when streaming is enabled', async () => {
+		const service = new LLMService() as unknown as LLMServiceInternals & {
+			initialize(
+				apiKey: string,
+				baseUrl: string,
+				modelName?: string,
+				apiHeaders?: Record<string, string>,
+				provider?: 'custom',
+				reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh',
+				stream?: boolean,
+			): void;
+		};
+		const payloads: Array<Record<string, unknown>> = [];
 
-    async function* validationChunks() {
-      yield { choices: [{ delta: { content: 'O' } }] };
-      yield { choices: [{ delta: { content: 'K' } }] };
-    }
+		async function* validationChunks() {
+			yield { choices: [{ delta: { content: 'O' } }] };
+			yield { choices: [{ delta: { content: 'K' } }] };
+		}
 
-    service.initialize('sk-test', 'https://example.com/v1', 'gpt-5.5', {}, 'custom', 'xhigh', true);
-    service.client = {
-      chat: {
-        completions: {
-          create: (payload) => {
-            payloads.push(payload);
-            return validationChunks();
-          },
-        },
-      },
-    };
+		service.initialize('sk-test', 'https://example.com/v1', 'gpt-5.5', {}, 'custom', 'xhigh', true);
+		service.client = {
+			chat: {
+				completions: {
+					create: (payload) => {
+						payloads.push(payload);
+						return validationChunks();
+					},
+				},
+			},
+		};
 
-    const valid = await service.validateConnection();
+		const valid = await service.validateConnection();
 
-    expect(valid).toBe(true);
-    expect(payloads[0]).toMatchObject({
-      model: 'gpt-5.5',
-      stream: true,
-      stream_options: {
-        include_usage: true,
-      },
-      reasoning_effort: 'xhigh',
-    });
-  });
+		expect(valid).toBe(true);
+		expect(payloads[0]).toMatchObject({
+			model: 'gpt-5.5',
+			stream: true,
+			stream_options: {
+				include_usage: true,
+			},
+			reasoning_effort: 'xhigh',
+		});
+	});
 });
 
 describe('LLMService reasoning effort requests', () => {
-  test('streams chat completions and aggregates content chunks when enabled', async () => {
-    const service = new LLMService() as unknown as LLMServiceInternals & {
-      initialize(
-        apiKey: string,
-        baseUrl: string,
-        modelName?: string,
-        apiHeaders?: Record<string, string>,
-        provider?: 'openai',
-        reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh',
-        stream?: boolean,
-      ): void;
-      generateDailyReport(issueAnalysis: string): Promise<string>;
-    };
-    const payloads: Array<Record<string, unknown>> = [];
+	test('streams chat completions and aggregates content chunks when enabled', async () => {
+		const service = new LLMService() as unknown as LLMServiceInternals & {
+			initialize(
+				apiKey: string,
+				baseUrl: string,
+				modelName?: string,
+				apiHeaders?: Record<string, string>,
+				provider?: 'openai',
+				reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh',
+				stream?: boolean,
+			): void;
+			generateDailyReport(issueAnalysis: string): Promise<string>;
+		};
+		const payloads: Array<Record<string, unknown>> = [];
 
-    async function* streamChunks() {
-      yield { choices: [{ delta: { content: 'hel' } }] };
-      yield { choices: [{ delta: { content: 'lo' } }] };
-      yield { choices: [], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } };
-    }
+		async function* streamChunks() {
+			yield { choices: [{ delta: { content: 'hel' } }] };
+			yield { choices: [{ delta: { content: 'lo' } }] };
+			yield { choices: [], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } };
+		}
 
-    service.initialize('sk-test', 'https://api.openai.com/v1', 'gpt-5.5', {}, 'openai', 'xhigh', true);
-    service.client = {
-      chat: {
-        completions: {
-          create: (payload) => {
-            payloads.push(payload);
-            return streamChunks();
-          },
-        },
-      },
-    };
+		service.initialize(
+			'sk-test',
+			'https://api.openai.com/v1',
+			'gpt-5.5',
+			{},
+			'openai',
+			'xhigh',
+			true,
+		);
+		service.client = {
+			chat: {
+				completions: {
+					create: (payload) => {
+						payloads.push(payload);
+						return streamChunks();
+					},
+				},
+			},
+		};
 
-    const content = await service.generateDailyReport('issue analysis');
+		const content = await service.generateDailyReport('issue analysis');
 
-    expect(content).toBe('hello');
-    expect(payloads[0]).toMatchObject({
-      model: 'gpt-5.5',
-      reasoning_effort: 'xhigh',
-      stream: true,
-      stream_options: {
-        include_usage: true,
-      },
-    });
-  });
+		expect(content).toBe('hello');
+		expect(payloads[0]).toMatchObject({
+			model: 'gpt-5.5',
+			reasoning_effort: 'xhigh',
+			stream: true,
+			stream_options: {
+				include_usage: true,
+			},
+		});
+	});
 
-  test('uses non-streaming chat completions by default', async () => {
-    const service = new LLMService() as unknown as LLMServiceInternals & {
-      initialize(
-        apiKey: string,
-        baseUrl: string,
-        modelName?: string,
-        apiHeaders?: Record<string, string>,
-        provider?: 'openai',
-        reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh',
-        stream?: boolean,
-      ): void;
-      generateDailyReport(issueAnalysis: string): Promise<string>;
-    };
-    const payloads: Array<Record<string, unknown>> = [];
+	test('uses non-streaming chat completions by default', async () => {
+		const service = new LLMService() as unknown as LLMServiceInternals & {
+			initialize(
+				apiKey: string,
+				baseUrl: string,
+				modelName?: string,
+				apiHeaders?: Record<string, string>,
+				provider?: 'openai',
+				reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh',
+				stream?: boolean,
+			): void;
+			generateDailyReport(issueAnalysis: string): Promise<string>;
+		};
+		const payloads: Array<Record<string, unknown>> = [];
 
-    service.initialize('sk-test', 'https://api.openai.com/v1', 'gpt-5.5', {}, 'openai', 'xhigh');
-    service.client = {
-      chat: {
-        completions: {
-          create: async (payload) => {
-            payloads.push(payload);
-            return { choices: [{ message: { content: 'done' } }] };
-          },
-        },
-      },
-    };
+		service.initialize('sk-test', 'https://api.openai.com/v1', 'gpt-5.5', {}, 'openai', 'xhigh');
+		service.client = {
+			chat: {
+				completions: {
+					create: async (payload) => {
+						payloads.push(payload);
+						return { choices: [{ message: { content: 'done' } }] };
+					},
+				},
+			},
+		};
 
-    const content = await service.generateDailyReport('issue analysis');
+		const content = await service.generateDailyReport('issue analysis');
 
-    expect(content).toBe('done');
-    expect(payloads[0]).toMatchObject({
-      model: 'gpt-5.5',
-      reasoning_effort: 'xhigh',
-    });
-    expect(payloads[0]).not.toHaveProperty('stream');
-    expect(payloads[0]).not.toHaveProperty('stream_options');
-  });
+		expect(content).toBe('done');
+		expect(payloads[0]).toMatchObject({
+			model: 'gpt-5.5',
+			reasoning_effort: 'xhigh',
+		});
+		expect(payloads[0]).not.toHaveProperty('stream');
+		expect(payloads[0]).not.toHaveProperty('stream_options');
+	});
 
-  test('passes configured reasoning effort to chat completions', async () => {
-    const service = new LLMService() as unknown as LLMServiceInternals & {
-      initialize(
-        apiKey: string,
-        baseUrl: string,
-        modelName?: string,
-        apiHeaders?: Record<string, string>,
-        provider?: 'openai',
-        reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh',
-      ): void;
-      generateDailyReport(issueAnalysis: string): Promise<string>;
-    };
-    const payloads: unknown[] = [];
+	test('passes configured reasoning effort to chat completions', async () => {
+		const service = new LLMService() as unknown as LLMServiceInternals & {
+			initialize(
+				apiKey: string,
+				baseUrl: string,
+				modelName?: string,
+				apiHeaders?: Record<string, string>,
+				provider?: 'openai',
+				reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh',
+			): void;
+			generateDailyReport(issueAnalysis: string): Promise<string>;
+		};
+		const payloads: unknown[] = [];
 
-    service.initialize('sk-test', 'https://api.openai.com/v1', 'gpt-5.5', {}, 'openai', 'high');
-    service.client = {
-      chat: {
-        completions: {
-          create: async (payload) => {
-            payloads.push(payload);
-            return { choices: [{ message: { content: 'done' } }] };
-          },
-        },
-      },
-    };
+		service.initialize('sk-test', 'https://api.openai.com/v1', 'gpt-5.5', {}, 'openai', 'high');
+		service.client = {
+			chat: {
+				completions: {
+					create: async (payload) => {
+						payloads.push(payload);
+						return { choices: [{ message: { content: 'done' } }] };
+					},
+				},
+			},
+		};
 
-    await service.generateDailyReport('issue analysis');
+		await service.generateDailyReport('issue analysis');
 
-    expect(payloads[0]).toMatchObject({
-      model: 'gpt-5.5',
-      reasoning_effort: 'high',
-    });
-  });
+		expect(payloads[0]).toMatchObject({
+			model: 'gpt-5.5',
+			reasoning_effort: 'high',
+		});
+	});
 
-  test('omits reasoning effort for non-reasoning chat models', async () => {
-    const service = new LLMService() as unknown as LLMServiceInternals & {
-      initialize(
-        apiKey: string,
-        baseUrl: string,
-        modelName?: string,
-        apiHeaders?: Record<string, string>,
-        provider?: 'openai',
-        reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh',
-      ): void;
-      generateDailyReport(issueAnalysis: string): Promise<string>;
-    };
-    const payloads: Array<Record<string, unknown>> = [];
+	test('omits reasoning effort for non-reasoning chat models', async () => {
+		const service = new LLMService() as unknown as LLMServiceInternals & {
+			initialize(
+				apiKey: string,
+				baseUrl: string,
+				modelName?: string,
+				apiHeaders?: Record<string, string>,
+				provider?: 'openai',
+				reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh',
+			): void;
+			generateDailyReport(issueAnalysis: string): Promise<string>;
+		};
+		const payloads: Array<Record<string, unknown>> = [];
 
-    service.initialize('sk-test', 'https://api.openai.com/v1', 'gpt-4o-mini', {}, 'openai', 'none');
-    service.client = {
-      chat: {
-        completions: {
-          create: async (payload) => {
-            payloads.push(payload);
-            return { choices: [{ message: { content: 'done' } }] };
-          },
-        },
-      },
-    };
+		service.initialize('sk-test', 'https://api.openai.com/v1', 'gpt-4o-mini', {}, 'openai', 'none');
+		service.client = {
+			chat: {
+				completions: {
+					create: async (payload) => {
+						payloads.push(payload);
+						return { choices: [{ message: { content: 'done' } }] };
+					},
+				},
+			},
+		};
 
-    await service.generateDailyReport('issue analysis');
+		await service.generateDailyReport('issue analysis');
 
-    expect(payloads[0]).not.toHaveProperty('reasoning_effort');
-  });
+		expect(payloads[0]).not.toHaveProperty('reasoning_effort');
+	});
 
-  test('omits default reasoning effort for custom legacy models', async () => {
-    const service = new LLMService() as unknown as LLMServiceInternals & {
-      initialize(
-        apiKey: string,
-        baseUrl: string,
-        modelName?: string,
-        apiHeaders?: Record<string, string>,
-        provider?: 'custom',
-        reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh',
-      ): void;
-      generateDailyReport(issueAnalysis: string): Promise<string>;
-    };
-    const payloads: Array<Record<string, unknown>> = [];
+	test('omits default reasoning effort for custom legacy models', async () => {
+		const service = new LLMService() as unknown as LLMServiceInternals & {
+			initialize(
+				apiKey: string,
+				baseUrl: string,
+				modelName?: string,
+				apiHeaders?: Record<string, string>,
+				provider?: 'custom',
+				reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh',
+			): void;
+			generateDailyReport(issueAnalysis: string): Promise<string>;
+		};
+		const payloads: Array<Record<string, unknown>> = [];
 
-    service.initialize('sk-test', 'https://example.com/v1', 'legacy-model', {}, 'custom', 'none');
-    service.client = {
-      chat: {
-        completions: {
-          create: async (payload) => {
-            payloads.push(payload);
-            return { choices: [{ message: { content: 'done' } }] };
-          },
-        },
-      },
-    };
+		service.initialize('sk-test', 'https://example.com/v1', 'legacy-model', {}, 'custom', 'none');
+		service.client = {
+			chat: {
+				completions: {
+					create: async (payload) => {
+						payloads.push(payload);
+						return { choices: [{ message: { content: 'done' } }] };
+					},
+				},
+			},
+		};
 
-    await service.generateDailyReport('issue analysis');
+		await service.generateDailyReport('issue analysis');
 
-    expect(payloads[0]).not.toHaveProperty('reasoning_effort');
-  });
+		expect(payloads[0]).not.toHaveProperty('reasoning_effort');
+	});
 });
 
 describe('LLMService issue scoring response parsing', () => {
-  test('parses structured matched issues and sorts by score descending', () => {
-    const service = new LLMService() as unknown as LLMServiceInternals;
-    const issues = [
-      createIssue({ repoFullName: 'acme/demo', repoName: 'demo', number: 42 }),
-      createIssue({ repoFullName: 'acme/web', repoName: 'web', number: 7, title: 'Improve docs' }),
-      createIssue({ repoFullName: 'acme/ignored', repoName: 'ignored', number: 11 }),
-    ];
+	test('parses structured matched issues and sorts by score descending', () => {
+		const service = new LLMService() as unknown as LLMServiceInternals;
+		const issues = [
+			createIssue({ repoFullName: 'acme/demo', repoName: 'demo', number: 42 }),
+			createIssue({ repoFullName: 'acme/web', repoName: 'web', number: 7, title: 'Improve docs' }),
+			createIssue({ repoFullName: 'acme/ignored', repoName: 'ignored', number: 11 }),
+		];
 
-    const parsed = service.parseLLMResponse(`
+		const parsed = service.parseLLMResponse(
+			`
       {
         "version": "1",
         "kind": "issue_match_list",
@@ -715,22 +758,28 @@ describe('LLMService issue scoring response parsing', () => {
           ]
         }
       }
-    `, issues);
+    `,
+			issues,
+		);
 
-    expect(parsed.status).toBe('success');
-    expect(parsed.data).toHaveLength(2);
-    expect(parsed.data[0]?.repoFullName).toBe('acme/demo');
-    expect(parsed.data[0]?.matchScore).toBe(100);
-    expect(parsed.data[0]?.analysis.techRequirements).toEqual(['react', 'typescript', 'accessibility']);
-    expect(parsed.data[1]?.repoFullName).toBe('acme/web');
-    expect(parsed.data[1]?.analysis.estimatedWorkload).toBe('30 minutes');
-  });
+		expect(parsed.status).toBe('success');
+		expect(parsed.data).toHaveLength(2);
+		expect(parsed.data[0]?.repoFullName).toBe('acme/demo');
+		expect(parsed.data[0]?.matchScore).toBe(100);
+		expect(parsed.data[0]?.analysis.techRequirements).toEqual([
+			'react',
+			'typescript',
+			'accessibility',
+		]);
+		expect(parsed.data[1]?.repoFullName).toBe('acme/web');
+		expect(parsed.data[1]?.analysis.estimatedWorkload).toBe('30 minutes');
+	});
 });
 
 describe('LLMService pull request draft parsing', () => {
-  test('parses structured patch drafts wrapped in envelopes', () => {
-    const service = new LLMService() as unknown as LLMServiceInternals;
-    const draft = service.parsePatchDraft(`
+	test('parses structured patch drafts wrapped in envelopes', () => {
+		const service = new LLMService() as unknown as LLMServiceInternals;
+		const draft = service.parsePatchDraft(`
       {
         "version": "1",
         "kind": "patch_draft",
@@ -756,14 +805,14 @@ describe('LLMService pull request draft parsing', () => {
       }
     `);
 
-    expect(draft.status).toBe('success');
-    expect(draft.data.goal).toBe('Add accessible labels to icon-only buttons');
-    expect(draft.data.targetFiles[0]?.path).toBe('src/components/IconButton.tsx');
-  });
+		expect(draft.status).toBe('success');
+		expect(draft.data.goal).toBe('Add accessible labels to icon-only buttons');
+		expect(draft.data.targetFiles[0]?.path).toBe('src/components/IconButton.tsx');
+	});
 
-  test('parses structured pull request drafts', () => {
-    const service = new LLMService() as unknown as LLMServiceInternals;
-    const draft = service.parsePullRequestDraft(`
+	test('parses structured pull request drafts', () => {
+		const service = new LLMService() as unknown as LLMServiceInternals;
+		const draft = service.parsePullRequestDraft(`
       {
         "version": "1",
         "kind": "pull_request_draft",
@@ -778,88 +827,90 @@ describe('LLMService pull request draft parsing', () => {
       }
     `);
 
-    expect(draft.status).toBe('success');
-    expect(draft.data.title).toBe('Add aria-label handling to icon-only buttons');
-    expect(draft.data.changes).toEqual(['Update the shared IconButton component']);
-  });
+		expect(draft.status).toBe('success');
+		expect(draft.data.title).toBe('Add aria-label handling to icon-only buttons');
+		expect(draft.data.changes).toEqual(['Update the shared IconButton component']);
+	});
 });
 
 describe('LLMService patch draft generation', () => {
-  test('repairs a non-JSON first draft into a valid patch draft envelope', async () => {
-    const service = new LLMService() as unknown as LLMServiceInternals;
-    const prompts: string[] = [];
+	test('repairs a non-JSON first draft into a valid patch draft envelope', async () => {
+		const service = new LLMService() as unknown as LLMServiceInternals;
+		const prompts: string[] = [];
 
-    service.client = {
-      chat: {
-        completions: {
-          create: async (payload) => {
-            prompts.push(payload.messages[1]?.content ?? '');
+		service.client = {
+			chat: {
+				completions: {
+					create: async (payload) => {
+						prompts.push(payload.messages[1]?.content ?? '');
 
-            if (prompts.length === 1) {
-              return {
-                choices: [{ message: { content: 'Plan: update the button component and tests.' } }],
-              };
-            }
+						if (prompts.length === 1) {
+							return {
+								choices: [{ message: { content: 'Plan: update the button component and tests.' } }],
+							};
+						}
 
-            return {
-              choices: [{
-                message: {
-                  content: JSON.stringify({
-                    version: '1',
-                    kind: 'patch_draft',
-                    status: 'success',
-                    data: {
-                      goal: 'Add accessible labels to icon-only buttons',
-                      targetFiles: [
-                        {
-                          path: 'src/components/IconButton.tsx',
-                          reason: 'Primary component logic',
-                        },
-                      ],
-                      proposedChanges: [
-                        {
-                          title: 'Update button API',
-                          details: 'Require an accessible label for icon-only rendering.',
-                          files: ['src/components/IconButton.tsx'],
-                        },
-                      ],
-                      risks: ['Consumer code may rely on current behavior'],
-                      validationNotes: ['Run bun test after the patch'],
-                    },
-                  }),
-                },
-              }],
-            };
-          },
-        },
-      },
-    };
+						return {
+							choices: [
+								{
+									message: {
+										content: JSON.stringify({
+											version: '1',
+											kind: 'patch_draft',
+											status: 'success',
+											data: {
+												goal: 'Add accessible labels to icon-only buttons',
+												targetFiles: [
+													{
+														path: 'src/components/IconButton.tsx',
+														reason: 'Primary component logic',
+													},
+												],
+												proposedChanges: [
+													{
+														title: 'Update button API',
+														details: 'Require an accessible label for icon-only rendering.',
+														files: ['src/components/IconButton.tsx'],
+													},
+												],
+												risks: ['Consumer code may rely on current behavior'],
+												validationNotes: ['Run bun test after the patch'],
+											},
+										}),
+									},
+								},
+							],
+						};
+					},
+				},
+			},
+		};
 
-    const draft = await service.generatePatchDraft(
-      createRankedIssue(),
-      createWorkspace({ validationCommands: createWorkspace().testCommands }),
-      createMemory(),
-    );
+		const draft = await service.generatePatchDraft(
+			createRankedIssue(),
+			createWorkspace({ validationCommands: createWorkspace().testCommands }),
+			createMemory(),
+		);
 
-    expect(draft.status).toBe('success');
-    expect(draft.data.goal).toBe('Add accessible labels to icon-only buttons');
-    expect(prompts).toHaveLength(2);
-    expect(prompts[1]).toContain('The previous patch draft response was not parseable');
-    expect(prompts[1]).toContain('Plan: update the button component and tests.');
-  });
+		expect(draft.status).toBe('success');
+		expect(draft.data.goal).toBe('Add accessible labels to icon-only buttons');
+		expect(prompts).toHaveLength(2);
+		expect(prompts[1]).toContain('The previous patch draft response was not parseable');
+		expect(prompts[1]).toContain('Plan: update the button component and tests.');
+	});
 });
 
 describe('LLMService repo memory formatting', () => {
-  test('includes run stats, path history, validation failures, and recent outcomes', () => {
-    const service = new LLMService() as unknown as LLMServiceInternals;
-    const formatted = service.formatRepoMemory(createMemory());
+	test('includes run stats, path history, validation failures, and recent outcomes', () => {
+		const service = new LLMService() as unknown as LLMServiceInternals;
+		const formatted = service.formatRepoMemory(createMemory());
 
-    expect(formatted).toContain('Run Stats: total=2, published=1, real_pr=1');
-    expect(formatted).toContain('Top Path Signals:');
-    expect(formatted).toContain('src/components/IconButton.tsx | candidate 3 | changed 2');
-    expect(formatted).toContain('Recent Validation Failure Signals:');
-    expect(formatted).toContain('bun test | failures 1 | last exit 1');
-    expect(formatted).toContain('Recent Issue Outcomes:');
-    expect(formatted).toContain('acme/demo#42 | status published');
-  });
+		expect(formatted).toContain('Run Stats: total=2, published=1, real_pr=1');
+		expect(formatted).toContain('Top Path Signals:');
+		expect(formatted).toContain('src/components/IconButton.tsx | candidate 3 | changed 2');
+		expect(formatted).toContain('Recent Validation Failure Signals:');
+		expect(formatted).toContain('bun test | failures 1 | last exit 1');
+		expect(formatted).toContain('Recent Issue Outcomes:');
+		expect(formatted).toContain('acme/demo#42 | status published');
+	});
 });
