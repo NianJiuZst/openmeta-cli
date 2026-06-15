@@ -10,8 +10,8 @@ export { MemoryService, memoryService } from './memory.js';
 export { OpportunityService, opportunityService } from './opportunity.js';
 export { ProofOfWorkService, proofOfWorkService } from './proof-of-work.js';
 export {
-  type ResolvedRepositoryScope,
   RepositoryTargetingService,
+  type ResolvedRepositoryScope,
   repositoryTargetingService,
 } from './repository-targeting.js';
 export { RunHistoryService, runHistoryService } from './run-history.js';

@@ -92,27 +92,31 @@ export class AnalyzeOrchestrator {
     this.showLocalRepositoryHint(repoPath);
 
     const totalSteps = 7;
-    const groups = scope.mode === 'single'
-      ? [
-          await this.collectSingleAnalysisGroup(scope.repo!, {
+    const groups =
+      scope.mode === 'single'
+        ? [
+            await this.collectSingleAnalysisGroup(scope.repo!, {
+              headless,
+              runChecks,
+              repoPath,
+              totalSteps,
+            }),
+          ]
+        : await this.collectAnalysisGroups(scope.repos, {
             headless,
             runChecks,
-            repoPath,
             totalSteps,
-          }),
-        ]
-      : await this.collectAnalysisGroups(scope.repos, {
-          headless,
-          runChecks,
-          totalSteps,
-        });
+          });
     const candidates = groups.flatMap((group) =>
-      group.suggestions.map((suggestion) => ({
-        repoFullName: group.repoFullName,
-        workspace: group.workspace,
-        memory: group.memory,
-        suggestion,
-      }) satisfies PresetAnalyzeCandidate),
+      group.suggestions.map(
+        (suggestion) =>
+          ({
+            repoFullName: group.repoFullName,
+            workspace: group.workspace,
+            memory: group.memory,
+            suggestion,
+          }) satisfies PresetAnalyzeCandidate,
+      ),
     );
     const selectedCandidate = headless
       ? this.selectTopCandidate(candidates)
@@ -121,7 +125,9 @@ export class AnalyzeOrchestrator {
     const workspace = selectedCandidate.workspace;
     const memory = selectedCandidate.memory;
     const selectedSuggestion = selectedCandidate.suggestion;
-    const suggestions = groups.find((group) => group.repoFullName === repoFullName)?.suggestions || [selectedSuggestion];
+    const suggestions = groups.find((group) => group.repoFullName === repoFullName)?.suggestions || [
+      selectedSuggestion,
+    ];
     const syntheticIssue = this.buildSyntheticIssue(repoFullName, selectedSuggestion);
 
     await ui.task(
@@ -214,11 +220,12 @@ export class AnalyzeOrchestrator {
       preset: options.preset,
       allowGlobal: false,
     });
-    const scopeLabel = scope.mode === 'single'
-      ? scope.repo!
-      : scope.presetName
-        ? `preset ${scope.presetName}`
-        : `${scope.repos.length} repositories`;
+    const scopeLabel =
+      scope.mode === 'single'
+        ? scope.repo!
+        : scope.presetName
+          ? `preset ${scope.presetName}`
+          : `${scope.repos.length} repositories`;
 
     ui.hero({
       label: 'OpenMeta Analyze',

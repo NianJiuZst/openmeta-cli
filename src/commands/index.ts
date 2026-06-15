@@ -1,6 +1,5 @@
 export { registerAgentCommand } from './agent.js';
 export { registerAnalyzeCommand } from './analyze.js';
-export { registerPresetCommand } from './preset.js';
 export { registerAutomationCommand } from './automation.js';
 export { registerConfigCommand } from './config.js';
 export { registerDailyCommand } from './daily.js';
@@ -9,6 +8,7 @@ export { registerInboxCommand } from './inbox.js';
 export { registerInitCommand } from './init.js';
 export { registerMachineCommand } from './machine.js';
 export { registerPowCommand } from './pow.js';
+export { registerPresetCommand } from './preset.js';
 export { registerProviderCommand } from './provider.js';
 export { registerRunsCommand } from './runs.js';
 export { registerScoutCommand } from './scout.js';

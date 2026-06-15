@@ -161,28 +161,32 @@ describe('DoctorOrchestrator', () => {
   test('warns when presets exist without an active preset and fails on invalid active preset references', async () => {
     const doctor = new DoctorOrchestrator();
 
-    const warned = await doctor.inspect(createConfig({
-      repositoryTargeting: {
-        activePreset: '',
-        presets: {
-          frontend: {
-            repos: ['vercel/next.js'],
+    const warned = await doctor.inspect(
+      createConfig({
+        repositoryTargeting: {
+          activePreset: '',
+          presets: {
+            frontend: {
+              repos: ['vercel/next.js'],
+            },
           },
         },
-      },
-    }));
+      }),
+    );
     expect(warned.checks.find((check) => check.id === 'repository-targeting')?.status).toBe('warn');
 
-    const failed = await doctor.inspect(createConfig({
-      repositoryTargeting: {
-        activePreset: 'missing',
-        presets: {
-          frontend: {
-            repos: ['vercel/next.js'],
+    const failed = await doctor.inspect(
+      createConfig({
+        repositoryTargeting: {
+          activePreset: 'missing',
+          presets: {
+            frontend: {
+              repos: ['vercel/next.js'],
+            },
           },
         },
-      },
-    }));
+      }),
+    );
     expect(failed.checks.find((check) => check.id === 'repository-targeting')?.status).toBe('fail');
   });
 });

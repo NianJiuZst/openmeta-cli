@@ -282,7 +282,8 @@ export class AgentOrchestrator {
       );
     }
 
-    const presetIssueFlowAllowed = !issueTarget &&
+    const presetIssueFlowAllowed =
+      !issueTarget &&
       scope?.mode === 'preset' &&
       (rankedIssues[0]?.opportunity.overallScore || 0) >= config.automation.minMatchScore;
     const presetQualifiedIssue = presetIssueFlowAllowed
@@ -841,8 +842,8 @@ export class AgentOrchestrator {
           : scope?.mode === 'preset'
             ? `Issue discovery is limited to preset ${scope.presetName} (${scope.repos.length} repositories).`
             : repoFullName
-            ? `Issue discovery is limited to ${repoFullName}.`
-            : 'Issue discovery will scan the broader GitHub issue stream.',
+              ? `Issue discovery is limited to ${repoFullName}.`
+              : 'Issue discovery will scan the broader GitHub issue stream.',
         repoPath
           ? `Local repository reuse is enabled via ${repoPath}. OpenMeta will create an isolated worktree and a fresh branch before opening a PR.`
           : 'If the repository already exists locally, pass --repo-path <local-path> so OpenMeta can reuse it via an isolated worktree and open the PR from a fresh branch.',
@@ -912,7 +913,8 @@ export class AgentOrchestrator {
       const displayIssues = issueRankingService.diversifyScoutIssues(rankedIssues, 5);
       this.renderOpportunityList('Top ranked opportunities', displayIssues);
     }
-    const presetIssueFlowAllowed = !issueTarget &&
+    const presetIssueFlowAllowed =
+      !issueTarget &&
       scope?.mode === 'preset' &&
       (rankedIssues[0]?.opportunity.overallScore || 0) >= config.automation.minMatchScore;
     const presetQualifiedIssue = presetIssueFlowAllowed
@@ -1221,7 +1223,8 @@ export class AgentOrchestrator {
     ui.hero({
       label: 'OpenMeta Scout',
       title: 'Read the field before you spend your focus',
-      subtitle: 'OpenMeta turns a noisy issue stream into a shortlist shaped by technical fit, timing, and real opening momentum.',
+      subtitle:
+        'OpenMeta turns a noisy issue stream into a shortlist shaped by technical fit, timing, and real opening momentum.',
       lines: [
         `Saved threshold reference: ${config.automation.minMatchScore}/100.`,
         refresh
@@ -1326,9 +1329,7 @@ export class AgentOrchestrator {
       },
     );
     const emptyExplanation =
-      rankedIssues.length === 0
-        ? this.buildScoutEmptyExplanation(config, { repoFullName, refresh })
-        : undefined;
+      rankedIssues.length === 0 ? this.buildScoutEmptyExplanation(config, { repoFullName, refresh }) : undefined;
 
     return {
       opportunities: issueRankingService.diversifyScoutIssues(rankedIssues, limit),
@@ -1887,10 +1888,7 @@ export class AgentOrchestrator {
       label: 'OpenMeta Agent',
       title: 'Preset issue scout did not clear the automation threshold',
       subtitle: 'OpenMeta will switch from issue-first scouting to repository analysis across the active preset.',
-      lines: [
-        `Repositories: ${input.repos.join(', ')}`,
-        `Threshold: ${input.config.automation.minMatchScore}/100`,
-      ],
+      lines: [`Repositories: ${input.repos.join(', ')}`, `Threshold: ${input.config.automation.minMatchScore}/100`],
       tone: 'info',
     });
 
@@ -1911,7 +1909,11 @@ export class AgentOrchestrator {
     completedStages.add('prepare');
     this.showWorkspaceSummary(selectedCandidate.workspace, memory);
 
-    this.renderAgentStage('draft', completedStages, 'Drafting patch strategy and turning it into concrete file changes.');
+    this.renderAgentStage(
+      'draft',
+      completedStages,
+      'Drafting patch strategy and turning it into concrete file changes.',
+    );
     const patchDraftResult = await ui.task(
       {
         title: 'Generating patch strategy',
@@ -1951,7 +1953,11 @@ export class AgentOrchestrator {
       testResults: implementation.validationResults,
     };
 
-    this.renderAgentStage('validate', completedStages, 'Reviewing validation outcomes before opening or publishing anything.');
+    this.renderAgentStage(
+      'validate',
+      completedStages,
+      'Reviewing validation outcomes before opening or publishing anything.',
+    );
     this.showValidationSummary(workspaceForArtifacts, implementation.changedFiles);
     completedStages.add('validate');
 
@@ -2020,16 +2026,29 @@ export class AgentOrchestrator {
       pullRequestNumber: contributionPullRequest.number,
     };
 
-    const dossier = contentService.formatContributionDossier(selectedIssue, workspaceForArtifacts, memory, patchDraft, prDraft);
-    const proofMarkdown = proofOfWorkService.renderMarkdown([
-      proofRecord,
-      ...proofOfWorkService.load().records,
-    ].slice(0, 100));
+    const dossier = contentService.formatContributionDossier(
+      selectedIssue,
+      workspaceForArtifacts,
+      memory,
+      patchDraft,
+      prDraft,
+    );
+    const proofMarkdown = proofOfWorkService.renderMarkdown(
+      [proofRecord, ...proofOfWorkService.load().records].slice(0, 100),
+    );
 
-    this.renderAgentStage('publish', completedStages, 'Saving dossier assets, updating long-term memory, and deciding whether to publish them.');
+    this.renderAgentStage(
+      'publish',
+      completedStages,
+      'Saving dossier assets, updating long-term memory, and deciding whether to publish them.',
+    );
     this.showArtifactPreview({
       issue: selectedIssue,
-      artifactRelativeDir: join('contributions', getLocalDateStamp(), `${selectedIssue.repoFullName.replace(/\//g, '__')}__${selectedIssue.number}`),
+      artifactRelativeDir: join(
+        'contributions',
+        getLocalDateStamp(),
+        `${selectedIssue.repoFullName.replace(/\//g, '__')}__${selectedIssue.number}`,
+      ),
       draftTitle: prDraft.title,
       changedFiles: implementation.changedFiles,
       validationResults: implementation.validationResults,
@@ -2173,10 +2192,7 @@ export class AgentOrchestrator {
       candidates.slice(0, 5).map((candidate) => ({
         title: `${candidate.repoFullName} - ${candidate.suggestion.title}`,
         subtitle: candidate.suggestion.summary,
-        meta: [
-          `score ${candidate.suggestion.prPotentialScore}`,
-          `workload ${candidate.suggestion.estimatedWorkload}`,
-        ],
+        meta: [`score ${candidate.suggestion.prPotentialScore}`, `workload ${candidate.suggestion.estimatedWorkload}`],
         lines: [`Files: ${candidate.suggestion.targetFiles.map((file) => file.path).join(', ')}`],
         tone: candidate.suggestion.prPotentialScore >= 80 ? 'success' : 'info',
       })),

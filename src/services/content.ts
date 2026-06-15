@@ -170,10 +170,7 @@ export class ContentService {
         '## Repository Groups',
         '',
         ...groups.flatMap((group) => {
-          const groupLines = [
-            `### ${group.repoFullName}`,
-            '',
-          ];
+          const groupLines = [`### ${group.repoFullName}`, ''];
 
           if (selectedSuggestion && group.repoFullName === repoFullName) {
             groupLines.push('Selected across all preset repositories', '');
@@ -184,14 +181,16 @@ export class ContentService {
             return groupLines;
           }
 
-          groupLines.push(...group.suggestions.flatMap((suggestion) => ([
-            `#### ${suggestion.title}`,
-            '',
-            `ID: ${suggestion.id}`,
-            `PR Potential: ${suggestion.prPotentialScore}/100`,
-            `Target Files: ${suggestion.targetFiles.map((file) => file.path).join(', ') || 'n/a'}`,
-            '',
-          ])));
+          groupLines.push(
+            ...group.suggestions.flatMap((suggestion) => [
+              `#### ${suggestion.title}`,
+              '',
+              `ID: ${suggestion.id}`,
+              `PR Potential: ${suggestion.prPotentialScore}/100`,
+              `Target Files: ${suggestion.targetFiles.map((file) => file.path).join(', ') || 'n/a'}`,
+              '',
+            ]),
+          );
 
           return groupLines;
         }),

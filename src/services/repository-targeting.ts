@@ -12,7 +12,9 @@ export class RepositoryTargetingService {
   normalizePresetName(nameInput: string): string {
     const name = nameInput.trim();
     if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(name)) {
-      throw new Error('Repository preset name must start with a letter or number and may contain letters, numbers, dots, underscores, or dashes.');
+      throw new Error(
+        'Repository preset name must start with a letter or number and may contain letters, numbers, dots, underscores, or dashes.',
+      );
     }
 
     return name;
@@ -103,7 +105,12 @@ export class RepositoryTargetingService {
     };
   }
 
-  validateConfig(config: AppConfig): { status: 'pass' | 'warn' | 'fail'; summary: string; detail?: string; remediation?: string } {
+  validateConfig(config: AppConfig): {
+    status: 'pass' | 'warn' | 'fail';
+    summary: string;
+    detail?: string;
+    remediation?: string;
+  } {
     const targeting = config.repositoryTargeting ?? { activePreset: '', presets: {} };
     const presets = targeting.presets || {};
     const names = Object.keys(presets);

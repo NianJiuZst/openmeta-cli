@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'fs';
-import { join } from 'path';
 import { tmpdir } from 'os';
+import { join } from 'path';
 import { configService } from '../src/infra/config.js';
 import { PresetOrchestrator } from '../src/orchestration/preset.js';
 import type { AppConfig } from '../src/types/index.js';
@@ -35,17 +35,11 @@ describe('PresetOrchestrator', () => {
     const orchestrator = new PresetOrchestrator();
 
     await orchestrator.add('frontend-core', {
-      repo: [
-        'vercel/next.js',
-        'https://github.com/vercel/next.js',
-        'git@github.com:facebook/react.git',
-      ],
+      repo: ['vercel/next.js', 'https://github.com/vercel/next.js', 'git@github.com:facebook/react.git'],
       activate: true,
     });
     await orchestrator.add('tooling', {
-      repo: [
-        'oven-sh/bun',
-      ],
+      repo: ['oven-sh/bun'],
     });
     await orchestrator.use('tooling');
 
@@ -63,13 +57,17 @@ describe('PresetOrchestrator', () => {
   test('rejects invalid preset repositories and repo counts beyond the configured limit', async () => {
     const orchestrator = new PresetOrchestrator();
 
-    await expect(orchestrator.add('broken', {
-      repo: ['https://gitlab.com/acme/demo'],
-    })).rejects.toThrow('Repository must be a GitHub repository');
+    await expect(
+      orchestrator.add('broken', {
+        repo: ['https://gitlab.com/acme/demo'],
+      }),
+    ).rejects.toThrow('Repository must be a GitHub repository');
 
-    await expect(orchestrator.add('too-many', {
-      repo: Array.from({ length: 11 }, (_, index) => `acme/demo-${index}`),
-    })).rejects.toThrow('must contain between 1 and 10 repositories');
+    await expect(
+      orchestrator.add('too-many', {
+        repo: Array.from({ length: 11 }, (_, index) => `acme/demo-${index}`),
+      }),
+    ).rejects.toThrow('must contain between 1 and 10 repositories');
   });
 
   test('removes repository presets and clears the active preset when needed', async () => {

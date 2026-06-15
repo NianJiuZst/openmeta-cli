@@ -8,11 +8,11 @@ import {
   ui,
 } from '../infra/index.js';
 import {
-  repositoryTargetingService,
   findLLMProviderPreset,
   githubService,
   LLM_PROVIDER_PRESETS,
   llmService,
+  repositoryTargetingService,
   type SchedulerSyncResult,
   schedulerService,
 } from '../services/index.js';
@@ -417,7 +417,11 @@ export class InitOrchestrator {
       () => {
         ui.keyValues('Repository presets', [
           { label: 'Active preset', value: repositoryTargeting.activePreset, tone: 'success' },
-          { label: 'Saved presets', value: String(Object.keys(repositoryTargeting.presets || {}).length), tone: 'info' },
+          {
+            label: 'Saved presets',
+            value: String(Object.keys(repositoryTargeting.presets || {}).length),
+            tone: 'info',
+          },
           {
             label: 'Active repos',
             value: repositoryTargetingService.getActiveRepos({ ...workingConfig, repositoryTargeting }).join(', '),
@@ -519,11 +523,16 @@ export class InitOrchestrator {
             value: repositoryTargeting.activePreset || '(none)',
             tone: repositoryTargeting.activePreset ? 'success' : 'muted',
           },
-          { label: 'Saved presets', value: String(Object.keys(repositoryTargeting.presets || {}).length), tone: 'info' },
+          {
+            label: 'Saved presets',
+            value: String(Object.keys(repositoryTargeting.presets || {}).length),
+            tone: 'info',
+          },
           {
             label: 'Active repos',
             value:
-              repositoryTargetingService.getActiveRepos({ ...workingConfig, repositoryTargeting }).join(', ') || '(none)',
+              repositoryTargetingService.getActiveRepos({ ...workingConfig, repositoryTargeting }).join(', ') ||
+              '(none)',
             tone: 'info',
           },
         ]);

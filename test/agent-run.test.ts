@@ -960,16 +960,10 @@ describe('AnalyzeOrchestrator run flow', () => {
       demoWorkspace,
       demoMemory,
     );
-    expect(analysisMarkdownSpy).toHaveBeenCalledWith(
-      'acme/demo',
-      demoWorkspace,
-      [demoSuggestion],
-      demoSuggestion,
-      [
-        { repoFullName: 'acme/demo', suggestions: [demoSuggestion] },
-        { repoFullName: 'acme/docs', suggestions: [docsSuggestion] },
-      ],
-    );
+    expect(analysisMarkdownSpy).toHaveBeenCalledWith('acme/demo', demoWorkspace, [demoSuggestion], demoSuggestion, [
+      { repoFullName: 'acme/demo', suggestions: [demoSuggestion] },
+      { repoFullName: 'acme/docs', suggestions: [docsSuggestion] },
+    ]);
     expect(writeArtifactsSpy).toHaveBeenCalledWith({
       artifacts,
       analysisMarkdown: '# Repository Analysis',

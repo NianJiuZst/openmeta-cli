@@ -16,9 +16,7 @@ export class PresetOrchestrator {
       label: 'OpenMeta Preset',
       title: names.length > 0 ? 'Saved repository presets are ready to reuse' : 'No repository presets saved yet',
       subtitle: 'Repository presets let you reuse fixed exploration targets across scout, analyze, and agent runs.',
-      lines: [
-        `Active preset: ${config.repositoryTargeting.activePreset || '(none)'}`,
-      ],
+      lines: [`Active preset: ${config.repositoryTargeting.activePreset || '(none)'}`],
       tone: names.length > 0 ? 'accent' : 'warning',
     });
 
@@ -31,15 +29,16 @@ export class PresetOrchestrator {
       return;
     }
 
-    ui.recordList('Repository presets', names.map((name) => ({
-      title: name,
-      subtitle: `${presets[name]?.repos.length || 0} repository target(s)`,
-      meta: [
-        config.repositoryTargeting.activePreset === name ? 'active' : 'saved',
-      ],
-      lines: (presets[name]?.repos || []).map((repo) => `- ${repo}`),
-      tone: config.repositoryTargeting.activePreset === name ? 'success' : 'info',
-    })));
+    ui.recordList(
+      'Repository presets',
+      names.map((name) => ({
+        title: name,
+        subtitle: `${presets[name]?.repos.length || 0} repository target(s)`,
+        meta: [config.repositoryTargeting.activePreset === name ? 'active' : 'saved'],
+        lines: (presets[name]?.repos || []).map((repo) => `- ${repo}`),
+        tone: config.repositoryTargeting.activePreset === name ? 'success' : 'info',
+      })),
+    );
   }
 
   async add(nameInput: string, options: PresetAddOptions): Promise<void> {
@@ -60,7 +59,9 @@ export class PresetOrchestrator {
     ui.card({
       label: 'OpenMeta Preset',
       title: 'Repository preset saved',
-      subtitle: options.activate ? 'This preset is now the active exploration target set.' : 'Switch to it later with "openmeta preset use <name>".',
+      subtitle: options.activate
+        ? 'This preset is now the active exploration target set.'
+        : 'Switch to it later with "openmeta preset use <name>".',
       lines: [
         `Preset: ${name}`,
         `Repositories: ${repos.join(', ')}`,
@@ -89,10 +90,7 @@ export class PresetOrchestrator {
       label: 'OpenMeta Preset',
       title: 'Active repository preset switched',
       subtitle: 'OpenMeta will use this preset by default unless a command overrides the target scope.',
-      lines: [
-        `Preset: ${name}`,
-        `Repositories: ${preset.repos.join(', ')}`,
-      ],
+      lines: [`Preset: ${name}`, `Repositories: ${preset.repos.join(', ')}`],
       tone: 'success',
     });
   }
@@ -106,7 +104,8 @@ export class PresetOrchestrator {
     }
 
     delete presets[name];
-    const activePreset = config.repositoryTargeting.activePreset === name ? '' : config.repositoryTargeting.activePreset;
+    const activePreset =
+      config.repositoryTargeting.activePreset === name ? '' : config.repositoryTargeting.activePreset;
     await configService.update({
       repositoryTargeting: {
         activePreset,
@@ -117,11 +116,10 @@ export class PresetOrchestrator {
     ui.card({
       label: 'OpenMeta Preset',
       title: 'Repository preset removed',
-      subtitle: activePreset ? 'The active preset remained unchanged.' : 'The removed preset was active, so no preset is now marked active.',
-      lines: [
-        `Preset: ${name}`,
-        `Active preset: ${activePreset || '(none)'}`,
-      ],
+      subtitle: activePreset
+        ? 'The active preset remained unchanged.'
+        : 'The removed preset was active, so no preset is now marked active.',
+      lines: [`Preset: ${name}`, `Active preset: ${activePreset || '(none)'}`],
       tone: 'success',
     });
   }

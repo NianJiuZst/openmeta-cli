@@ -296,14 +296,14 @@ export class ConfigService {
   private normalizeRepositoryPresets(
     presets: AppConfig['repositoryTargeting']['presets'] = {},
   ): AppConfig['repositoryTargeting']['presets'] {
-    return Object.fromEntries(Object.entries(presets).map(([name, preset]) => [
-      name,
-      {
-        repos: Array.isArray(preset?.repos)
-          ? preset.repos.map((repo) => String(repo).trim()).filter(Boolean)
-          : [],
-      },
-    ]));
+    return Object.fromEntries(
+      Object.entries(presets).map(([name, preset]) => [
+        name,
+        {
+          repos: Array.isArray(preset?.repos) ? preset.repos.map((repo) => String(repo).trim()).filter(Boolean) : [],
+        },
+      ]),
+    );
   }
 }
 
