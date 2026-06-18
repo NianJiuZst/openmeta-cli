@@ -22,6 +22,10 @@ const MAX_GENERATED_FILES = 6;
 const MAX_GENERATED_FILE_CHARS = 60_000;
 type ExecutionMode = 'interactive' | 'headless';
 
+function normalizeRepoRelativePath(path: string): string {
+  return path.replace(/\\/g, '/').replace(/^\/+/, '').trim();
+}
+
 interface PreparedWorkspaceState {
   workspacePath: string;
   defaultBranch: string;
@@ -114,7 +118,7 @@ export class WorkspaceService {
   ): GeneratedChangeApplyResult {
     const rootPath = resolve(workspacePath);
     const allowedPaths = new Set(
-      (options.allowedPaths ?? []).map((path) => path.replace(/^\/+/, '').trim()).filter(Boolean),
+      (options.allowedPaths ?? []).map((path) => normalizeRepoRelativePath(path)).filter(Boolean),
     );
     const appliedFiles: string[] = [];
     const skippedFiles: GeneratedChangeApplyResult['skippedFiles'] = [];
@@ -132,7 +136,7 @@ export class WorkspaceService {
     }
 
     for (const change of fileChanges) {
-      const relativePath = change.path.replace(/^\/+/, '').trim();
+      const relativePath = normalizeRepoRelativePath(change.path);
       if (!relativePath) {
         skippedFiles.push({ path: change.path, reason: 'Generated path is empty.' });
         continue;
@@ -196,7 +200,7 @@ export class WorkspaceService {
     const rootPath = resolve(workspacePath);
 
     return filePaths.flatMap((filePath) => {
-      const relativePath = filePath.replace(/^\/+/, '').trim();
+      const relativePath = normalizeRepoRelativePath(filePath);
       if (!relativePath) {
         return [];
       }
@@ -514,7 +518,7 @@ export class WorkspaceService {
           continue;
         }
 
-        files.push(relative(root, join(current, entry.name)));
+        files.push(normalizeRepoRelativePath(relative(root, join(current, entry.name))));
         if (files.length >= MAX_DISCOVERED_FILES) {
           break;
         }

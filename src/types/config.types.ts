@@ -1,7 +1,7 @@
 import type { ContentType } from './content.types.js';
 
 export type UserProficiency = 'beginner' | 'intermediate' | 'advanced';
-export type SchedulerProvider = 'launchd' | 'cron' | 'manual';
+export type SchedulerProvider = 'launchd' | 'cron' | 'schtasks' | 'manual';
 
 export interface UserProfile {
   techStack: string[];

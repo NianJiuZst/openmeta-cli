@@ -33,6 +33,28 @@ function uniqueStrings(values: string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
 
+function normalizeRepoRelativePath(path: string): string {
+  return String(path || '')
+    .replace(/\\/g, '/')
+    .replace(/^\.\//, '')
+    .replace(/^\/+/, '')
+    .trim();
+}
+
+function normalizeRepoMemoryPathSignals(pathSignals: RepoMemory['pathSignals']): RepoMemory['pathSignals'] {
+  return pathSignals.map((signal) => ({
+    ...signal,
+    path: normalizeRepoRelativePath(signal.path),
+  }));
+}
+
+function normalizeRepoMemoryRecentIssues(recentIssues: RepoMemory['recentIssues']): RepoMemory['recentIssues'] {
+  return recentIssues.map((issue) => ({
+    ...issue,
+    changedFiles: uniqueStrings(issue.changedFiles.map((path) => normalizeRepoRelativePath(path))),
+  }));
+}
+
 function summarizeValidationResults(results: TestResult[]): string {
   if (results.length === 0) {
     return 'not run';
@@ -68,16 +90,15 @@ export class MemoryService {
       ...defaultMemory(repoFullName),
       ...raw,
       detectedTestCommands: raw.detectedTestCommands ?? [],
-      preferredPaths: raw.preferredPaths ?? [],
+      preferredPaths: uniqueStrings((raw.preferredPaths ?? []).map((path) => normalizeRepoRelativePath(path))),
       runStats: {
         ...defaultMemory(repoFullName).runStats,
         ...raw.runStats,
       },
-      pathSignals: raw.pathSignals ?? [],
+      pathSignals: normalizeRepoMemoryPathSignals(raw.pathSignals ?? []),
       validationSignals: raw.validationSignals ?? [],
-      recentIssues: (raw.recentIssues ?? []).map((issue) => ({
+      recentIssues: normalizeRepoMemoryRecentIssues(raw.recentIssues ?? []).map((issue) => ({
         ...issue,
-        changedFiles: issue.changedFiles ?? [],
         published: issue.published ?? false,
         reviewRequired: issue.reviewRequired ?? false,
         status: issue.status ?? 'selected',

@@ -7,6 +7,7 @@ import type { AppConfig, SchedulerProvider } from '../types/index.js';
 
 const LAUNCHD_LABEL = 'com.openmeta.daily';
 const CRON_TAG = '# openmeta-daily';
+const SCHTASKS_TASK_NAME = 'OpenMeta Daily';
 const DEFAULT_PATH = '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin';
 
 type SchedulerSyncStatus = 'installed' | 'removed' | 'manual' | 'failed';
@@ -18,6 +19,8 @@ interface SchedulerContext {
 
 interface CommandResult {
   success: boolean;
+  status?: number | null;
+  signal?: NodeJS.Signals | null;
   message?: string;
 }
 
@@ -37,6 +40,10 @@ export class SchedulerService {
 
     if (process.platform === 'linux') {
       return 'cron';
+    }
+
+    if (process.platform === 'win32') {
+      return 'schtasks';
     }
 
     return 'manual';
@@ -61,7 +68,16 @@ export class SchedulerService {
     }
 
     const context = this.getSchedulerContext();
-    return provider === 'launchd' ? this.installLaunchd(config, context) : this.installCron(config, context);
+
+    if (provider === 'launchd') {
+      return this.installLaunchd(config, context);
+    }
+
+    if (provider === 'cron') {
+      return this.installCron(config, context);
+    }
+
+    return this.installSchtasks(config, context);
   }
 
   private uninstall(provider: SchedulerProvider): SchedulerSyncResult {
@@ -71,6 +87,10 @@ export class SchedulerService {
 
     if (provider === 'cron') {
       return this.uninstallCron();
+    }
+
+    if (provider === 'schtasks') {
+      return this.uninstallSchtasks();
     }
 
     return {
@@ -257,6 +277,75 @@ export class SchedulerService {
     };
   }
 
+  private installSchtasks(config: AppConfig, context: SchedulerContext): SchedulerSyncResult {
+    const command = this.buildCommandString(context, 'schtasks');
+    const createResult = this.runCommand(
+      'schtasks',
+      ['/Create', '/TN', SCHTASKS_TASK_NAME, '/TR', command, '/SC', 'DAILY', '/ST', config.automation.scheduleTime, '/IT', '/F'],
+      false,
+    );
+
+    if (!createResult.success) {
+      return {
+        provider: 'schtasks',
+        status: 'failed',
+        detail: `Task Scheduler entry could not be installed: ${createResult.message || 'unknown schtasks error'}`,
+        command,
+      };
+    }
+
+    return {
+      provider: 'schtasks',
+      status: 'installed',
+      detail: `Windows Task Scheduler will run the OpenMeta agent every day at ${config.automation.scheduleTime} (${config.automation.timezone}).`,
+      command,
+    };
+  }
+
+  private uninstallSchtasks(): SchedulerSyncResult {
+    const queryResult = this.runCommand('schtasks', ['/Query', '/TN', SCHTASKS_TASK_NAME, '/HRESULT'], true);
+
+    if (!queryResult.success) {
+      if (this.isMissingSchtasksTask(queryResult)) {
+        return {
+          provider: 'schtasks',
+          status: 'removed',
+          detail: 'Windows Task Scheduler automation was removed.',
+        };
+      }
+
+      return {
+        provider: 'schtasks',
+        status: 'failed',
+        detail: `Task Scheduler entry could not be inspected before removal: ${queryResult.message || 'unknown schtasks error'}`,
+      };
+    }
+
+    const deleteResult = this.runCommand('schtasks', ['/Delete', '/TN', SCHTASKS_TASK_NAME, '/F', '/HRESULT'], false);
+
+    if (!deleteResult.success) {
+      if (this.isMissingSchtasksTask(deleteResult)) {
+        return {
+          provider: 'schtasks',
+          status: 'removed',
+          detail: 'Windows Task Scheduler automation was removed.',
+        };
+      }
+
+      return {
+        provider: 'schtasks',
+        status: 'failed',
+        detail: `Task Scheduler entry could not be removed: ${deleteResult.message || 'unknown schtasks error'}`,
+      };
+    }
+
+    return {
+      provider: 'schtasks',
+      status: 'removed',
+      detail: 'Windows Task Scheduler automation was removed.',
+    };
+  }
+
   private readCrontab(): { content: string; error?: string } {
     const result = spawnSync('crontab', ['-l'], { encoding: 'utf-8' });
 
@@ -296,6 +385,8 @@ export class SchedulerService {
       }
       return {
         success: false,
+        status: result.status,
+        signal: result.signal,
         message: result.error.message,
       };
     }
@@ -307,11 +398,13 @@ export class SchedulerService {
       }
       return {
         success: false,
+        status: result.status,
+        signal: result.signal,
         message,
       };
     }
 
-    return { success: true };
+    return { success: true, status: result.status, signal: result.signal };
   }
 
   private getSchedulerContext(): SchedulerContext {
@@ -328,9 +421,23 @@ export class SchedulerService {
     };
   }
 
-  private buildCommandString(context: SchedulerContext): string {
+  private buildCommandString(context: SchedulerContext, provider: SchedulerProvider = this.detectProvider()): string {
+    if (provider === 'schtasks') {
+      return this.buildWindowsCommandString(context);
+    }
+
+    return this.buildPosixCommandString(context);
+  }
+
+  private buildPosixCommandString(context: SchedulerContext): string {
     return [context.executablePath, context.entryScriptPath, 'agent', '--headless', '--scheduler-run']
       .map((value) => this.shellEscape(value))
+      .join(' ');
+  }
+
+  private buildWindowsCommandString(context: SchedulerContext): string {
+    return [context.executablePath, context.entryScriptPath, 'agent', '--headless', '--scheduler-run']
+      .map((value) => this.windowsEscapeArg(value))
       .join(' ');
   }
 
@@ -407,6 +514,23 @@ export class SchedulerService {
 
   private shellEscape(value: string): string {
     return `'${value.replace(/'/g, `'\\''`)}'`;
+  }
+
+  private windowsEscapeArg(value: string): string {
+    return `"${value.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/g, '$1$1')}"`;
+  }
+
+  private isMissingSchtasksTask(result: CommandResult): boolean {
+    if (result.status !== 2 || process.platform !== 'win32') {
+      return false;
+    }
+
+    return !existsSync(this.getSchtasksTaskFilePath());
+  }
+
+  private getSchtasksTaskFilePath(): string {
+    const windowsRoot = process.env['WINDIR'] || process.env['SystemRoot'] || 'C:\\Windows';
+    return join(windowsRoot, 'System32', 'Tasks', SCHTASKS_TASK_NAME);
   }
 
   private escapeXml(value: string): string {

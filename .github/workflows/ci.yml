@@ -9,7 +9,11 @@ on:
 jobs:
   ci:
     name: CI
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
 
     steps:
       - name: Checkout
@@ -29,3 +33,42 @@ jobs:
 
       - name: Run tests
         run: bun test
+
+      - name: Verify Windows Task Scheduler integration
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          @'
+          const { spawnSync } = require('node:child_process');
+          const taskName = 'OpenMeta CI Smoke';
+          const taskCommand = '"C:\\Windows\\System32\\cmd.exe" "/c" "exit 0"';
+
+          spawnSync('schtasks', ['/Delete', '/TN', taskName, '/F'], { encoding: 'utf8' });
+
+          const create = spawnSync(
+            'schtasks',
+            ['/Create', '/TN', taskName, '/TR', taskCommand, '/SC', 'DAILY', '/ST', '09:00', '/IT', '/F'],
+            { encoding: 'utf8' },
+          );
+          if (create.status !== 0) {
+            console.error(create.stderr || create.stdout || `create failed: ${create.status}`);
+            process.exit(create.status || 1);
+          }
+
+          const query = spawnSync('schtasks', ['/Query', '/TN', taskName, '/XML', 'ONE'], { encoding: 'utf8' });
+          if (query.status !== 0) {
+            console.error(query.stderr || query.stdout || `query failed: ${query.status}`);
+            process.exit(query.status || 1);
+          }
+
+          if (!query.stdout.includes('<LogonType>InteractiveToken</LogonType>')) {
+            console.error(query.stdout);
+            process.exit(1);
+          }
+
+          const remove = spawnSync('schtasks', ['/Delete', '/TN', taskName, '/F'], { encoding: 'utf8' });
+          if (remove.status !== 0) {
+            console.error(remove.stderr || remove.stdout || `delete failed: ${remove.status}`);
+            process.exit(remove.status || 1);
+          }
+          '@ | node -

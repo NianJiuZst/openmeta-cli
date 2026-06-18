@@ -12,6 +12,37 @@ function clearSharedConfigCache(): void {
   (configService as unknown as { config: AppConfig | null }).config = null;
 }
 
+function withMockedPlatform<T>(platform: NodeJS.Platform, callback: () => Promise<T> | T): Promise<T> | T {
+  const originalDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+
+  Object.defineProperty(process, 'platform', {
+    configurable: true,
+    value: platform,
+  });
+
+  const restore = () => {
+    if (originalDescriptor) {
+      Object.defineProperty(process, 'platform', originalDescriptor);
+      return;
+    }
+
+    delete (process as { platform?: NodeJS.Platform }).platform;
+  };
+
+  try {
+    const result = callback();
+    if (result && typeof (result as Promise<T>).then === 'function') {
+      return (result as Promise<T>).finally(restore);
+    }
+
+    restore();
+    return result;
+  } catch (error) {
+    restore();
+    throw error;
+  }
+}
+
 describe('ConfigOrchestrator', () => {
   beforeEach(() => {
     tempRoot = mkdtempSync(join(tmpdir(), 'openmeta-config-orchestrator-'));
@@ -93,5 +124,49 @@ describe('ConfigOrchestrator', () => {
     expect(result.appliedValue).toBe('***cret');
     expect(result.snapshot.llm.apiKey).toBe('***cret');
     expect(result.scheduler.status).toBe('unchanged');
+  });
+
+  test('normalizes legacy manual scheduler configs to schtasks on Windows', async () => {
+    await withMockedPlatform('win32', async () => {
+      const service = new ConfigService();
+
+      await service.save({
+        ...(await service.get()),
+        automation: {
+          ...(await service.get()).automation,
+          scheduler: 'manual',
+        },
+      });
+
+      expect((await service.get()).automation.scheduler).toBe('schtasks');
+
+      (service as unknown as { config: AppConfig | null }).config = null;
+      const loaded = await service.load();
+
+      expect(loaded.automation.scheduler).toBe('schtasks');
+    });
+  });
+
+  test('save keeps unrelated llm fields intact while normalizing scheduler cache on Windows', async () => {
+    await withMockedPlatform('win32', async () => {
+      const service = new ConfigService();
+      const current = await service.get();
+
+      await service.save({
+        ...current,
+        llm: {
+          ...current.llm,
+          apiHeaders: { 'X-Keep': 'yes' },
+        },
+        automation: {
+          ...current.automation,
+          scheduler: 'manual',
+        },
+      });
+
+      const saved = await service.get();
+      expect(saved.llm.apiHeaders).toEqual({ 'X-Keep': 'yes' });
+      expect(saved.automation.scheduler).toBe('schtasks');
+    });
   });
 });

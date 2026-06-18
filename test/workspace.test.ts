@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { simpleGit } from 'simple-git';
+import { pathToFileURL } from 'url';
 import { workspaceService } from '../src/services/workspace.js';
 import { createMemory, createRankedIssue } from './helpers/factories.js';
 
@@ -18,7 +19,13 @@ afterEach(() => {
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop();
     if (dir) {
-      rmSync(dir, { recursive: true, force: true });
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch (error) {
+        if (!(error instanceof Error) || !/EBUSY/i.test(error.message)) {
+          throw error;
+        }
+      }
     }
   }
 });
@@ -122,7 +129,9 @@ describe('workspaceService.applyGeneratedChanges', () => {
 });
 
 describe('workspaceService.detectTestCommands', () => {
-  test('uses a local repository path by creating an isolated worktree instead of cloning into the managed workspace', async () => {
+  test(
+    'uses a local repository path by creating an isolated worktree instead of cloning into the managed workspace',
+    async () => {
     const tempRoot = makeWorkspace();
     const openMetaHome = join(tempRoot, 'openmeta-home');
     const sourcePath = join(tempRoot, 'source');
@@ -170,9 +179,13 @@ describe('workspaceService.detectTestCommands', () => {
     } finally {
       delete process.env['OPENMETA_HOME'];
     }
-  });
+    },
+    { timeout: 20_000 },
+  );
 
-  test('prepares repository workspace without a real issue target', async () => {
+  test(
+    'prepares repository workspace without a real issue target',
+    async () => {
     const tempRoot = makeWorkspace();
     const openMetaHome = join(tempRoot, 'openmeta-home');
     const remotePath = join(tempRoot, 'remote.git');
@@ -218,7 +231,7 @@ describe('workspaceService.detectTestCommands', () => {
       }>;
     };
     const originalBuildRepoUrl = service.buildRepoUrl;
-    service.buildRepoUrl = () => remotePath;
+    service.buildRepoUrl = () => pathToFileURL(remotePath).href;
 
     try {
       const workspace = await service.prepareRepositoryWorkspace(
@@ -241,9 +254,13 @@ describe('workspaceService.detectTestCommands', () => {
       service.buildRepoUrl = originalBuildRepoUrl;
       delete process.env['OPENMETA_HOME'];
     }
-  });
+    },
+    { timeout: 20_000 },
+  );
 
-  test('creates a shallow single-branch clone for new managed workspaces', async () => {
+  test(
+    'creates a shallow single-branch clone for new managed workspaces',
+    async () => {
     const tempRoot = makeWorkspace();
     const openMetaHome = join(tempRoot, 'openmeta-home');
     const remotePath = join(tempRoot, 'remote.git');
@@ -271,7 +288,7 @@ describe('workspaceService.detectTestCommands', () => {
       ): Promise<{ workspacePath: string }>;
     };
     const originalBuildRepoUrl = service.buildRepoUrl;
-    service.buildRepoUrl = () => remotePath;
+    service.buildRepoUrl = () => pathToFileURL(remotePath).href;
 
     try {
       const workspace = await service.prepareRepositoryWorkspace(
@@ -289,9 +306,13 @@ describe('workspaceService.detectTestCommands', () => {
       service.buildRepoUrl = originalBuildRepoUrl;
       delete process.env['OPENMETA_HOME'];
     }
-  });
+    },
+    { timeout: 20_000 },
+  );
 
-  test('rebuilds a managed workspace when the cached clone has an invalid HEAD', async () => {
+  test(
+    'rebuilds a managed workspace when the cached clone has an invalid HEAD',
+    async () => {
     const tempRoot = makeWorkspace();
     const openMetaHome = join(tempRoot, 'openmeta-home');
     const remotePath = join(tempRoot, 'remote.git');
@@ -319,7 +340,7 @@ describe('workspaceService.detectTestCommands', () => {
       ): Promise<{ workspacePath: string; topLevelFiles: string[] }>;
     };
     const originalBuildRepoUrl = service.buildRepoUrl;
-    service.buildRepoUrl = () => remotePath;
+    service.buildRepoUrl = () => pathToFileURL(remotePath).href;
 
     try {
       const firstWorkspace = await service.prepareRepositoryWorkspace(
@@ -345,7 +366,9 @@ describe('workspaceService.detectTestCommands', () => {
       service.buildRepoUrl = originalBuildRepoUrl;
       delete process.env['OPENMETA_HOME'];
     }
-  });
+    },
+    { timeout: 20_000 },
+  );
 
   test('prefers bun for package scripts when a bun lockfile is present', () => {
     const workspacePath = makeWorkspace();

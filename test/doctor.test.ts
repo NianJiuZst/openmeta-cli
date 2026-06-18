@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { DoctorOrchestrator } from '../src/orchestration/doctor.js';
+import { schedulerService } from '../src/services/scheduler.js';
 import * as runtimeDiagnosticsModule from '../src/services/runtime-diagnostics.js';
 import type { AppConfig } from '../src/types/index.js';
 
@@ -152,5 +153,31 @@ describe('DoctorOrchestrator', () => {
 
     expect(report.ready).toBe(false);
     expect(report.checks.find((check) => check.id === 'target-repo')?.status).toBe('fail');
+  });
+
+  test('passes scheduler checks on Windows when schtasks is available', async () => {
+    const originalDetectProvider = schedulerService.detectProvider;
+
+    try {
+      schedulerService.detectProvider = () => 'schtasks';
+      const report = await new DoctorOrchestrator().inspect(
+        createConfig({
+          automation: {
+            ...createConfig().automation,
+            enabled: true,
+            scheduler: 'schtasks',
+          },
+        }),
+      );
+
+      expect(report.checks.find((check) => check.id === 'scheduler-config')).toEqual(
+        expect.objectContaining({
+          status: 'pass',
+          summary: 'schtasks can run automation at 09:00.',
+        }),
+      );
+    } finally {
+      schedulerService.detectProvider = originalDetectProvider;
+    }
   });
 });

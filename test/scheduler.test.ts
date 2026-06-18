@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import { SchedulerService } from '../src/services/scheduler.js';
 import type { AppConfig } from '../src/types/index.js';
 
 interface SchedulerTestHarness {
   sync(config: AppConfig): ReturnType<SchedulerService['sync']>;
-  detectProvider(): 'launchd' | 'cron' | 'manual';
+  detectProvider(): 'launchd' | 'cron' | 'schtasks' | 'manual';
   getSchedulerContext(): { executablePath: string; entryScriptPath: string };
   readCrontab(): { content: string; error?: string };
   runCommand(
@@ -15,9 +15,12 @@ interface SchedulerTestHarness {
     args: string[],
     allowFailure?: boolean,
     input?: string,
-  ): { success: boolean; message?: string };
+  ): { success: boolean; status?: number | null; signal?: NodeJS.Signals | null; message?: string };
   parseScheduleTime(value: string): { hour: number; minute: number };
-  buildCommandString(context: { executablePath: string; entryScriptPath: string }): string;
+  buildCommandString(
+    context: { executablePath: string; entryScriptPath: string },
+    provider?: 'launchd' | 'cron' | 'schtasks' | 'manual',
+  ): string;
   buildLaunchdPlist(options: {
     executablePath: string;
     entryScriptPath: string;
@@ -28,7 +31,9 @@ interface SchedulerTestHarness {
     workingDirectory: string;
   }): string;
   shellEscape(value: string): string;
+  windowsEscapeArg(value: string): string;
   escapeXml(value: string): string;
+  getSchtasksTaskFilePath(): string;
 }
 
 let tempRoot = '';
@@ -104,21 +109,42 @@ describe('SchedulerService', () => {
     const scheduler = new SchedulerService() as unknown as SchedulerTestHarness;
 
     expect(scheduler.shellEscape("/tmp/it's here")).toBe("'/tmp/it'\\''s here'");
+    expect(scheduler.windowsEscapeArg('C:\\Program Files\\OpenMeta\\bun.exe')).toBe('"C:\\Program Files\\OpenMeta\\bun.exe"');
     expect(scheduler.escapeXml(`A&B<"'`)).toBe('A&amp;B&lt;&quot;&apos;');
   });
 
   test('builds scheduler command strings with quoted executable and entry paths', () => {
     const scheduler = new SchedulerService() as unknown as SchedulerTestHarness;
-    const command = scheduler.buildCommandString({
-      executablePath: '/Applications/OpenMeta App/bin/node',
-      entryScriptPath: "/tmp/OpenMeta's Agent/cli.js",
-    });
+    const command = scheduler.buildCommandString(
+      {
+        executablePath: '/Applications/OpenMeta App/bin/node',
+        entryScriptPath: "/tmp/OpenMeta's Agent/cli.js",
+      },
+      'cron',
+    );
 
     expect(command).toContain("'/Applications/OpenMeta App/bin/node'");
     expect(command).toContain("'agent'");
     expect(command).toContain("'--headless'");
     expect(command).toContain("'--scheduler-run'");
     expect(command).toContain("'/tmp/OpenMeta'\\''s Agent/cli.js'");
+  });
+
+  test('builds windows scheduler command strings with quoted executable and entry paths', () => {
+    const scheduler = new SchedulerService() as unknown as SchedulerTestHarness;
+    const command = scheduler.buildCommandString(
+      {
+        executablePath: 'C:\\Program Files\\OpenMeta\\bun.exe',
+        entryScriptPath: 'C:\\Users\\tester\\OpenMeta Agent\\cli.js',
+      },
+      'schtasks',
+    );
+
+    expect(command).toContain('"C:\\Program Files\\OpenMeta\\bun.exe"');
+    expect(command).toContain('"C:\\Users\\tester\\OpenMeta Agent\\cli.js"');
+    expect(command).toContain('"agent"');
+    expect(command).toContain('"--headless"');
+    expect(command).toContain('"--scheduler-run"');
   });
 
   test('returns manual scheduler instructions when automation is enabled on unsupported platforms', async () => {
@@ -239,6 +265,149 @@ describe('SchedulerService', () => {
       scheduler.detectProvider = originalDetectProvider;
       scheduler.readCrontab = originalReadCrontab;
       scheduler.runCommand = originalRunCommand;
+    }
+  });
+
+  test('installs Windows Task Scheduler entries with a quoted command string', async () => {
+    const scheduler = new SchedulerService() as unknown as SchedulerTestHarness;
+    const originalDetectProvider = scheduler.detectProvider;
+    const originalGetSchedulerContext = scheduler.getSchedulerContext;
+    const originalRunCommand = scheduler.runCommand;
+    let capturedCommand = '';
+    let capturedArgs: string[] = [];
+
+    try {
+      scheduler.detectProvider = () => 'schtasks';
+      scheduler.getSchedulerContext = () => ({
+        executablePath: 'C:\\Program Files\\OpenMeta\\bun.exe',
+        entryScriptPath: 'C:\\Users\\tester\\OpenMeta Agent\\cli.js',
+      });
+      scheduler.runCommand = (command: string, args: string[]) => {
+        capturedCommand = command;
+        capturedArgs = args;
+        return { success: true };
+      };
+
+      const result = await scheduler.sync(
+        createConfig({
+          automation: {
+            ...createConfig().automation,
+            scheduler: 'schtasks',
+          },
+        }),
+      );
+
+      expect(result).toEqual({
+        provider: 'schtasks',
+        status: 'installed',
+        detail: 'Windows Task Scheduler will run the OpenMeta agent every day at 09:30 (Asia/Shanghai).',
+        command:
+          '"C:\\Program Files\\OpenMeta\\bun.exe" "C:\\Users\\tester\\OpenMeta Agent\\cli.js" "agent" "--headless" "--scheduler-run"',
+      });
+      expect(capturedCommand).toBe('schtasks');
+      expect(capturedArgs).toEqual([
+        '/Create',
+        '/TN',
+        'OpenMeta Daily',
+        '/TR',
+        '"C:\\Program Files\\OpenMeta\\bun.exe" "C:\\Users\\tester\\OpenMeta Agent\\cli.js" "agent" "--headless" "--scheduler-run"',
+        '/SC',
+        'DAILY',
+        '/ST',
+        '09:30',
+        '/IT',
+        '/F',
+      ]);
+    } finally {
+      scheduler.detectProvider = originalDetectProvider;
+      scheduler.getSchedulerContext = originalGetSchedulerContext;
+      scheduler.runCommand = originalRunCommand;
+    }
+  });
+
+  test('removes Windows Task Scheduler entries idempotently when the task is missing', async () => {
+    const scheduler = new SchedulerService() as unknown as SchedulerTestHarness;
+    const originalDetectProvider = scheduler.detectProvider;
+    const originalRunCommand = scheduler.runCommand;
+    const originalPlatform = process.platform;
+    const originalWindir = process.env['WINDIR'];
+    const invocations: Array<{ command: string; args: string[]; allowFailure?: boolean }> = [];
+    const fakeWindowsRoot = join(tempRoot, 'windows-root');
+
+    try {
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+      process.env['WINDIR'] = fakeWindowsRoot;
+      scheduler.detectProvider = () => 'schtasks';
+      scheduler.runCommand = (command: string, args: string[], allowFailure?: boolean) => {
+        invocations.push({ command, args, allowFailure });
+        if (args[0] === '/Query') {
+          return { success: false, status: 2, message: 'ERROR: The system cannot find the file specified.' };
+        }
+
+        return { success: true };
+      };
+
+      const result = await scheduler.sync(
+        createConfig({
+          automation: {
+            ...createConfig().automation,
+            enabled: false,
+            scheduler: 'schtasks',
+          },
+        }),
+      );
+
+      expect(result).toEqual({
+        provider: 'schtasks',
+        status: 'removed',
+        detail: 'Windows Task Scheduler automation was removed.',
+      });
+      expect(invocations).toEqual([
+        {
+          command: 'schtasks',
+          args: ['/Query', '/TN', 'OpenMeta Daily', '/HRESULT'],
+          allowFailure: true,
+        },
+      ]);
+    } finally {
+      Object.defineProperty(process, 'platform', { value: originalPlatform });
+      if (originalWindir === undefined) {
+        delete process.env['WINDIR'];
+      } else {
+        process.env['WINDIR'] = originalWindir;
+      }
+      scheduler.detectProvider = originalDetectProvider;
+      scheduler.runCommand = originalRunCommand;
+    }
+  });
+
+  test('does not treat localized schtasks failures as missing when the task file still exists', () => {
+    const scheduler = new SchedulerService() as unknown as SchedulerTestHarness;
+    const originalPlatform = process.platform;
+    const originalWindir = process.env['WINDIR'];
+    const taskFilePath = join(tempRoot, 'windows-root', 'System32', 'Tasks', 'OpenMeta Daily');
+
+    try {
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+      process.env['WINDIR'] = join(tempRoot, 'windows-root');
+      mkdirSync(dirname(taskFilePath), { recursive: true });
+      writeFileSync(taskFilePath, '<Task />', 'utf-8');
+
+      expect(
+        (scheduler as unknown as { isMissingSchtasksTask: (result: { success: boolean; status?: number | null; message?: string }) => boolean }).isMissingSchtasksTask({
+          success: false,
+          status: 2,
+          message: 'ERROR: 系统找不到指定的文件。',
+        }),
+      ).toBe(false);
+      expect(scheduler.getSchtasksTaskFilePath()).toBe(taskFilePath);
+    } finally {
+      Object.defineProperty(process, 'platform', { value: originalPlatform });
+      if (originalWindir === undefined) {
+        delete process.env['WINDIR'];
+      } else {
+        process.env['WINDIR'] = originalWindir;
+      }
     }
   });
 

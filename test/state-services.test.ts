@@ -141,12 +141,24 @@ describe('stateful services', () => {
       targetPath,
       JSON.stringify({
         repoFullName: 'acme/demo',
+        preferredPaths: ['src\\components\\IconButton.tsx'],
+        pathSignals: [
+          {
+            path: 'src\\components\\IconButton.tsx',
+            candidateCount: 2,
+            changedCount: 1,
+            successfulValidationCount: 1,
+            publishedCount: 0,
+            lastSeenAt: '2026-04-10T08:00:00.000Z',
+          },
+        ],
         recentIssues: [
           {
             reference: 'acme/demo#42',
             title: 'Legacy record',
             overallScore: 81,
             generatedAt: '2026-04-10T08:00:00.000Z',
+            changedFiles: ['src\\components\\IconButton.tsx'],
           },
         ],
       }),
@@ -157,11 +169,14 @@ describe('stateful services', () => {
 
     expect(loaded.detectedTestCommands).toEqual([]);
     expect(loaded.runStats.totalRuns).toBe(0);
-    expect(loaded.recentIssues[0]?.changedFiles).toEqual([]);
+    expect(loaded.recentIssues[0]?.changedFiles).toEqual(['src/components/IconButton.tsx']);
     expect(loaded.recentIssues[0]?.published).toBe(false);
     expect(loaded.recentIssues[0]?.reviewRequired).toBe(false);
     expect(loaded.recentIssues[0]?.status).toBe('selected');
     expect(loaded.recentIssues[0]?.validationSummary).toBe('not run');
+    expect(loaded.preferredPaths).toEqual(['src/components/IconButton.tsx']);
+    expect(loaded.pathSignals[0]?.path).toBe('src/components/IconButton.tsx');
+    expect(loaded.recentIssues[0]?.changedFiles).toEqual(['src/components/IconButton.tsx']);
   });
 
   test('memory service records draft-only outcomes without validation failures', () => {
