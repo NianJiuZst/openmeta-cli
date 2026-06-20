@@ -39,6 +39,7 @@ import type {
   LLMReasoningEffort,
   MatchedIssue,
   RankedIssue,
+  RepositoryContributionRules,
   RepoFileSnippet,
   RepoMemory,
   RepoWorkspaceContext,
@@ -275,6 +276,7 @@ Repo Stars: ${i.repoStars}`,
       issueContext: this.formatRankedIssue(issue),
       patchDraft: JSON.stringify(patchDraft, null, 2),
       validationContext: contextAssemblerService.buildValidationContext(workspace),
+      contributionRulesContext: this.formatContributionRules(workspace.contributionRules),
     });
 
     return this.generateStructuredOutput({
@@ -575,6 +577,33 @@ Repo Stars: ${i.repoStars}`,
     ].join('\n');
   }
 
+  private formatContributionRules(rules?: RepositoryContributionRules): string {
+    if (!rules) {
+      return 'No repository-specific contribution rules were detected.';
+    }
+
+    const checklist =
+      rules.requiredChecklistItems.length > 0 ? rules.requiredChecklistItems.map((item) => `- ${item}`).join('\n') : '- none';
+    const template = rules.prTemplate ? `\nPR Template (${rules.prTemplatePath || 'detected'}):\n${rules.prTemplate}` : '';
+
+    return [
+      `Detected Rule Files: ${rules.detectedFiles.join(', ') || 'none'}`,
+      `PR Title Rules: ${rules.prTitleRules.join(' | ') || 'none'}`,
+      `Commit Message Rules: ${rules.commitMessageRules.join(' | ') || 'none'}`,
+      `Branch Naming Rules: ${rules.branchNamingRules.join(' | ') || 'none'}`,
+      `Validation Rules: ${rules.requiredValidationRules.join(' | ') || 'none'}`,
+      `Issue Linking Rules: ${rules.issueLinkingRules.join(' | ') || 'none'}`,
+      `Release Note Rules: ${rules.releaseNoteRules.join(' | ') || 'none'}`,
+      `Checklist Items:\n${checklist}`,
+      `Prior Discussion Required: ${rules.requiresPriorDiscussion ? 'yes' : 'no'}`,
+      `Issue Linking Required: ${rules.requiresIssueLinking ? 'yes' : 'no'}`,
+      `Release Notes Required: ${rules.requiresReleaseNotes ? 'yes' : 'no'}`,
+      `Passing Validation Required: ${rules.requiresPassingValidation ? 'yes' : 'no'}`,
+      template,
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+  }
   private formatEnvironment(environment: EnvironmentInfo): string {
     const availableTools = environment.tools
       .filter((tool) => tool.available)

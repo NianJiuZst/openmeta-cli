@@ -389,6 +389,7 @@ Requirements:
 3. Summary must explain the user problem and the intended fix.
 4. Changes, validation, and risks must be flat string lists.
 5. Validation must mention the provided test commands and whether they passed or are still pending.
+6. Follow the repository contribution rules and PR template when they are provided.
 
 Output schema:
 {
@@ -412,6 +413,9 @@ Patch Draft:
 
 Validation Context:
 {{validationContext}}
+
+Repository Contribution Rules:
+{{contributionRulesContext}}
 `;
 
 export const REPOSITORY_ANALYSIS_PROMPT = `You are OpenMeta, an autonomous open source contribution agent.

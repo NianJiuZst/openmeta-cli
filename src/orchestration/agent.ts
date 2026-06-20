@@ -3057,6 +3057,29 @@ export class AgentOrchestrator {
 
     if (prDecision.outcome !== 'allow') {
       logger.warn(`Skipping real draft PR creation: ${prDecision.reason}`);
+    const unsatisfiedContributionRules = this.evaluateUnsatisfiedContributionRules(
+      input.workspace,
+      hasBlockingValidationFailures,
+    );
+    if (unsatisfiedContributionRules.length > 0) {
+      const message = `Skipping real draft PR creation because repository contribution requirements are not satisfied: ${unsatisfiedContributionRules.join('; ')}`;
+      logger.warn(message);
+      input.workspace.validationWarnings = [...input.workspace.validationWarnings, ...unsatisfiedContributionRules];
+      ui.callout({
+        label: 'OpenMeta Agent',
+        title: 'Repository constraints require review',
+        subtitle: 'OpenMeta kept this run in artifact-only mode to avoid opening a process-invalid PR.',
+        lines: unsatisfiedContributionRules,
+        tone: 'warning',
+      });
+      return {
+        changedFiles: input.changedFiles,
+        validationResults: input.validationResults,
+      };
+    }
+
+    if (input.headless && hasBlockingValidationFailures) {
+      logger.warn('Skipping real draft PR creation because validation failed in headless mode.');
       return {
         changedFiles: input.changedFiles,
         validationResults: input.validationResults,
@@ -3102,6 +3125,7 @@ export class AgentOrchestrator {
         prDraft: input.prDraft,
         workspacePath: input.workspace.workspacePath,
         changedFiles: input.changedFiles,
+        contributionRules: input.workspace.contributionRules,
       });
 
       ui.card({
@@ -3259,6 +3283,29 @@ export class AgentOrchestrator {
 
   private hasBlockingValidationFailures(results: TestResult[]): boolean {
     return results.some((result) => !result.passed && !this.isInfrastructureValidationFailure(result));
+  }
+
+  private evaluateUnsatisfiedContributionRules(
+    workspace: RepoWorkspaceContext,
+    hasBlockingValidationFailures: boolean,
+  ): string[] {
+    const rules = workspace.contributionRules;
+    if (!rules) {
+      return [];
+    }
+
+    const missing: string[] = [];
+    if (rules.requiresPriorDiscussion) {
+      missing.push(
+        'Repository guidance indicates prior maintainer discussion or approval is required before opening a PR.',
+      );
+    }
+
+    if (rules.requiresPassingValidation && hasBlockingValidationFailures) {
+      missing.push('Repository guidance requires passing validation before opening a PR.');
+    }
+
+    return missing;
   }
 
   private resolveMachineExecutionOutcome(input: {

@@ -63,6 +63,24 @@ export interface RepoFileSnippet {
   content: string;
 }
 
+export interface RepositoryContributionRules {
+  detectedFiles: string[];
+  sourceSnippets: Array<{ path: string; excerpt: string }>;
+  prTemplatePath?: string;
+  prTemplate?: string;
+  requiredChecklistItems: string[];
+  prTitleRules: string[];
+  commitMessageRules: string[];
+  branchNamingRules: string[];
+  requiredValidationRules: string[];
+  issueLinkingRules: string[];
+  releaseNoteRules: string[];
+  requiresPriorDiscussion: boolean;
+  requiresIssueLinking: boolean;
+  requiresReleaseNotes: boolean;
+  requiresPassingValidation: boolean;
+}
+
 export interface GeneratedFileChange {
   path: string;
   reason: string;
@@ -91,6 +109,7 @@ export interface RepoWorkspaceContext {
   workspaceDirty: boolean;
   defaultBranch: string;
   branchName?: string;
+  contributionRules?: RepositoryContributionRules;
   topLevelFiles: string[];
   candidateFiles: string[];
   snippets: RepoFileSnippet[];
