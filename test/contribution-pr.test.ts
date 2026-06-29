@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { ContributionPrService, contributionPrService, githubService } from '../src/services/index.js';
-import { createPullRequestDraft, createRankedIssue } from './helpers/factories.js';
+import { createPullRequestDraft, createRankedIssue, createRepositoryRules } from './helpers/factories.js';
 
 interface ContributionPrInternals {
   initialize(octokit: unknown): void;
@@ -12,6 +12,7 @@ interface ContributionPrInternals {
     prDraft: ReturnType<typeof createPullRequestDraft>;
     workspacePath: string;
     changedFiles: string[];
+    repositoryRules?: ReturnType<typeof createRepositoryRules>;
   }): Promise<{
     branchName: string;
     url: string;
@@ -39,6 +40,23 @@ describe('ContributionPrService', () => {
     expect(parsed.body).not.toContain('Title:');
   });
 
+  test('uses repository PR templates when building the pull request payload', () => {
+    const parsed = contributionPrService.buildDraftPullRequest(
+      createPullRequestDraft({
+        summary: 'Tighten keyboard accessibility around dialogs.',
+        changes: ['Update dialog focus trapping'],
+        validation: ['bun test'],
+      }),
+      createRepositoryRules({
+        prTemplateBody: '## Summary\n\n{{summary}}\n\n## Validation\n\n{{validation}}',
+      }),
+    );
+
+    expect(parsed.body).toContain('Tighten keyboard accessibility around dialogs.');
+    expect(parsed.body).toContain('- bun test');
+    expect(parsed.body).toContain('## Changes');
+  });
+
   test('builds bounded branch names and commit messages for generated contribution PRs', () => {
     const issue = createRankedIssue({
       repoFullName: 'acme/widgets',
@@ -46,11 +64,17 @@ describe('ContributionPrService', () => {
       title: 'Fix keyboard focus in icon-only widgets with an intentionally long title',
     });
 
-    const branchName = contributionPrService.buildPublishBranchName(issue);
-    const commitMessage = contributionPrService.buildContributionCommitMessage(issue);
+    const branchName = contributionPrService.buildPublishBranchName(
+      issue,
+      createRepositoryRules({ branchNamingRule: 'Use fix/... branch names for bug fixes.' }),
+    );
+    const commitMessage = contributionPrService.buildContributionCommitMessage(
+      issue,
+      createRepositoryRules({ commitMessageRule: 'Use fix: for bug-fix commits.' }),
+    );
 
-    expect(branchName).toMatch(/^openmeta\/agent-42-fix-keyboard-focus-in-icon-only-+\d+$/);
-    expect(commitMessage).toStartWith('feat: address acme/widgets#42 Fix keyboard focus');
+    expect(branchName).toMatch(/^fix\/42-fix-keyboard-focus-in-icon-only-+\d+$/);
+    expect(commitMessage).toStartWith('fix: address acme/widgets#42 Fix keyboard focus');
     expect(commitMessage.length).toBeLessThanOrEqual(120);
   });
 

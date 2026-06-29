@@ -19,6 +19,7 @@ import {
   createProofRecord,
   createPullRequestDraft,
   createRankedIssue,
+  createRepositoryRules,
   createRepositorySuggestion,
   createWorkspace,
 } from './helpers/factories.js';
@@ -328,6 +329,109 @@ describe('AgentOrchestrator run flow', () => {
       'No issue met the automation threshold',
       'Top opportunities were below 75/100. Lower the threshold or widen your profile.',
     );
+  });
+
+  test('keeps the run in artifact mode when repository rules block automatic PR creation', async () => {
+    const orchestrator = new AgentOrchestrator() as unknown as AgentRunInternals;
+    const calloutSpy = spyOn(infra.ui, 'callout').mockImplementation(() => {});
+
+    const result = await orchestrator.submitContributionPullRequestIfPossible({
+      config: createConfig(),
+      allowRealPr: true,
+      headless: true,
+      issue: createRankedIssue(),
+      prDraft: createPullRequestDraft(),
+      workspace: createWorkspace({
+        repositoryRules: createRepositoryRules({
+          blockingRequirements: ['Repository requires an associated issue link before raising a PR.'],
+        }),
+      }),
+      changedFiles: ['src/components/IconButton.tsx'],
+      validationResults: [],
+    });
+
+    expect(result.url).toBeUndefined();
+    expect(calloutSpy).toHaveBeenCalled();
+    expect(result.reviewReason).toContain('issue linking');
+  });
+
+  test('blocks PR creation when repository requires prior discussion evidence and none is present', async () => {
+    const orchestrator = new AgentOrchestrator() as unknown as AgentRunInternals;
+
+    const result = await orchestrator.submitContributionPullRequestIfPossible({
+      config: createConfig(),
+      allowRealPr: true,
+      headless: true,
+      issue: createRankedIssue({ body: 'Bug report without maintainer discussion.' }),
+      prDraft: createPullRequestDraft(),
+      workspace: createWorkspace({
+        repositoryRules: createRepositoryRules({
+          requiredIssueLinking: undefined,
+          requiredValidationNotes: [],
+          requiredChecklistItems: [],
+          requiresPriorDiscussion: true,
+          requiredDiscussionEvidence: true,
+        }),
+      }),
+      changedFiles: ['src/components/IconButton.tsx'],
+      validationResults: [],
+    });
+
+    expect(result.url).toBeUndefined();
+    expect(result.reviewReason).toContain('prior discussion');
+  });
+
+  test('blocks PR creation when repository requires issue linking and release notes that the draft does not provide', async () => {
+    const orchestrator = new AgentOrchestrator() as unknown as AgentRunInternals;
+
+    const result = await orchestrator.submitContributionPullRequestIfPossible({
+      config: createConfig(),
+      allowRealPr: true,
+      headless: true,
+      issue: createRankedIssue(),
+      prDraft: createPullRequestDraft({
+        body: '## Summary\n\nAccessibility fix only.',
+        validation: ['bun test passed'],
+      }),
+      workspace: createWorkspace({
+        repositoryRules: createRepositoryRules({
+          requiredIssueLinking: 'Reference the GitHub issue in the PR body.',
+          requiredReleaseNotes: true,
+        }),
+      }),
+      changedFiles: ['src/components/IconButton.tsx'],
+      validationResults: [{ command: 'bun test', exitCode: 0, passed: true, output: 'ok' }],
+    });
+
+    expect(result.url).toBeUndefined();
+    expect(result.reviewReason).toContain('issue linking');
+    expect(result.reviewReason).toContain('release note');
+  });
+
+  test('blocks PR creation when repository requires a conventional PR title and the draft title does not match', async () => {
+    const orchestrator = new AgentOrchestrator() as unknown as AgentRunInternals;
+
+    const result = await orchestrator.submitContributionPullRequestIfPossible({
+      config: createConfig(),
+      allowRealPr: true,
+      headless: true,
+      issue: createRankedIssue(),
+      prDraft: createPullRequestDraft({
+        title: 'Add aria-label handling to icon-only buttons',
+      }),
+      workspace: createWorkspace({
+        repositoryRules: createRepositoryRules({
+          prTitleRule: 'Use conventional commit style titles such as fix(scope): ...',
+          requiredIssueLinking: undefined,
+          requiredValidationNotes: [],
+        }),
+      }),
+      changedFiles: ['src/components/IconButton.tsx'],
+      validationResults: [],
+    });
+
+    expect(result.url).toBeUndefined();
+    expect(result.reviewReason).toContain('PR title');
   });
 
   test('runs the full interactive flow and records a published outcome', async () => {

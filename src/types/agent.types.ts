@@ -63,6 +63,41 @@ export interface RepoFileSnippet {
   content: string;
 }
 
+export interface RepositoryRuleFile {
+  path: string;
+  content: string;
+}
+
+export interface RepositoryContributionRules {
+  detectedFiles: string[];
+  summary: string[];
+  prTemplateBody?: string;
+  prTitleRule?: string;
+  commitMessageRule?: string;
+  branchNamingRule?: string;
+  requiredChecklistItems: string[];
+  requiredValidationNotes: string[];
+  requiredIssueLinking?: string;
+  allowsDraftPr?: boolean;
+  requiresPriorDiscussion: boolean;
+  missingRequirements: string[];
+  blockingRequirements: string[];
+  requiredReleaseNotes: boolean;
+  requiredDiscussionEvidence: boolean;
+}
+
+export interface RepositoryRulesSnapshot {
+  repoFullName: string;
+  cacheKey: string;
+  cachedAt: string;
+  detectedFiles: Array<{
+    path: string;
+    mtimeMs: number;
+    size: number;
+  }>;
+  rules: RepositoryContributionRules;
+}
+
 export interface GeneratedFileChange {
   path: string;
   reason: string;
@@ -98,6 +133,7 @@ export interface RepoWorkspaceContext {
   validationCommands: TestCommand[];
   validationWarnings: string[];
   testResults: TestResult[];
+  repositoryRules?: RepositoryContributionRules;
 }
 
 export interface RepoMemoryIssueRecord {
@@ -111,6 +147,7 @@ export interface RepoMemoryIssueRecord {
   reviewRequired: boolean;
   validationSummary: string;
   pullRequestUrl?: string;
+  reviewReason?: string;
 }
 
 export interface RepoMemoryRunStats {
@@ -183,6 +220,7 @@ export interface ProofOfWorkRecord {
   published: boolean;
   pullRequestUrl?: string;
   pullRequestNumber?: number;
+  reviewReason?: string;
 }
 
 export interface ContributionArtifacts {

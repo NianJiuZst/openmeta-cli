@@ -15,6 +15,7 @@ import type {
   TestResult,
 } from '../types/index.js';
 import { permissionPolicyService } from './permission-policy.js';
+import { repositoryRulesService } from './repository-rules.js';
 
 const EXCLUDED_DIRS = new Set(['.git', 'node_modules', 'dist', 'build', '.next', 'coverage', 'target', 'vendor']);
 
@@ -89,6 +90,7 @@ export class WorkspaceService {
       candidateFiles,
       runChecks,
       executionMode,
+      repoFullName: issue.repoFullName,
     });
   }
 
@@ -117,6 +119,7 @@ export class WorkspaceService {
       branchName: workspaceState.branchName,
       runChecks,
       executionMode,
+      repoFullName,
     });
   }
 
@@ -492,7 +495,8 @@ export class WorkspaceService {
     return 'main';
   }
 
-  private buildWorkspaceContext(input: {
+  private async buildWorkspaceContext(input: {
+    repoFullName: string;
     workspacePath: string;
     workspaceDirty: boolean;
     defaultBranch: string;
@@ -500,7 +504,7 @@ export class WorkspaceService {
     candidateFiles: string[];
     runChecks: boolean;
     executionMode: ExecutionMode;
-  }): RepoWorkspaceContext {
+  }): Promise<RepoWorkspaceContext> {
     const topLevelFiles = readdirSync(input.workspacePath).slice(0, 50);
     const snippets = input.candidateFiles.map((path) => ({
       path,
@@ -511,6 +515,7 @@ export class WorkspaceService {
       testCommands,
       input.executionMode,
     );
+    const repositoryRules = await repositoryRulesService.loadFromWorkspace(input.repoFullName, input.workspacePath);
     const testResults = input.runChecks
       ? this.runTestCommands(input.workspacePath, validationCommands.slice(0, 3))
       : [];
@@ -527,6 +532,7 @@ export class WorkspaceService {
       validationCommands,
       validationWarnings,
       testResults,
+      repositoryRules,
     };
   }
 
@@ -572,6 +578,7 @@ export class WorkspaceService {
           continue;
         }
 
+        files.push(normalizeRepoRelativePath(relative(root, join(current, entry.name))));
         files.push(normalizeRepoRelativePath(relative(root, join(current, entry.name))));
         if (files.length >= MAX_DISCOVERED_FILES) {
           break;

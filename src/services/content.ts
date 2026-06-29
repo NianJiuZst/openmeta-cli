@@ -7,6 +7,7 @@ import type {
   MatchedIssue,
   ProofOfWorkRecord,
   RankedIssue,
+  RepositoryContributionRules,
   RepoMemory,
   RepoWorkspaceContext,
 } from '../types/index.js';
@@ -104,7 +105,15 @@ export class ContentService {
     return lines.join('\n');
   }
 
-  formatPullRequestDraftBody(draft: PullRequestDraft): string {
+  formatPullRequestDraftBody(draft: PullRequestDraft, rules?: RepositoryContributionRules): string {
+    if (draft.body?.trim()) {
+      return draft.body.trim();
+    }
+
+    if (rules?.prTemplateBody?.trim()) {
+      return this.fillTemplateBody(rules.prTemplateBody, draft);
+    }
+
     const lines = [
       '## Summary',
       '',
@@ -127,8 +136,39 @@ export class ContentService {
     return lines.join('\n');
   }
 
-  formatPullRequestDraftMarkdown(draft: PullRequestDraft): string {
-    return [`Title: ${draft.title}`, '', this.formatPullRequestDraftBody(draft)].join('\n');
+  formatPullRequestDraftMarkdown(draft: PullRequestDraft, rules?: RepositoryContributionRules): string {
+    return [`Title: ${draft.title}`, '', this.formatPullRequestDraftBody(draft, rules)].join('\n');
+  }
+
+  private fillTemplateBody(template: string, draft: PullRequestDraft): string {
+    const sections = {
+      summary: draft.summary,
+      changes: draft.changes.map((change) => `- ${change}`).join('\n') || '- None',
+      validation: draft.validation.map((item) => `- ${item}`).join('\n') || '- Not run',
+      risks: draft.risks.map((item) => `- ${item}`).join('\n') || '- None',
+      issue: draft.summary,
+    };
+
+    let output = template.trim();
+    output = output.replace(/{{\s*summary\s*}}/gi, sections.summary);
+    output = output.replace(/{{\s*changes\s*}}/gi, sections.changes);
+    output = output.replace(/{{\s*validation\s*}}/gi, sections.validation);
+    output = output.replace(/{{\s*risks\s*}}/gi, sections.risks);
+    output = output.replace(/{{\s*issue\s*}}/gi, sections.issue);
+
+    const ensureSection = (heading: string, body: string) => {
+      if (new RegExp(`^##\\s+${heading}$`, 'im').test(output)) {
+        return;
+      }
+      output = `${output}\n\n## ${heading}\n\n${body}`.trim();
+    };
+
+    ensureSection('Summary', sections.summary);
+    ensureSection('Changes', sections.changes);
+    ensureSection('Validation', sections.validation);
+    ensureSection('Risks', sections.risks);
+
+    return output;
   }
 
   formatRepositoryAnalysisMarkdown(
@@ -311,6 +351,27 @@ export class ContentService {
           )
         : ['- Not executed']),
       '',
+      '## Repository Contribution Rules',
+      '',
+      ...(workspace.repositoryRules
+        ? [
+            `- Detected Files: ${workspace.repositoryRules.detectedFiles.join(', ') || 'none'}`,
+            `- Summary: ${workspace.repositoryRules.summary.join(' | ') || 'none'}`,
+            `- PR Title Rule: ${workspace.repositoryRules.prTitleRule || 'none'}`,
+            `- Commit Message Rule: ${workspace.repositoryRules.commitMessageRule || 'none'}`,
+            `- Branch Naming Rule: ${workspace.repositoryRules.branchNamingRule || 'none'}`,
+            `- Required Checklist: ${workspace.repositoryRules.requiredChecklistItems.join(' | ') || 'none'}`,
+            `- Required Validation Notes: ${workspace.repositoryRules.requiredValidationNotes.join(' | ') || 'none'}`,
+            `- Required Issue Linking: ${workspace.repositoryRules.requiredIssueLinking || 'none'}`,
+            `- Allows Draft PR: ${workspace.repositoryRules.allowsDraftPr === undefined ? 'unknown' : workspace.repositoryRules.allowsDraftPr ? 'yes' : 'no'}`,
+            `- Requires Prior Discussion: ${workspace.repositoryRules.requiresPriorDiscussion ? 'yes' : 'no'}`,
+            `- Required Release Notes: ${workspace.repositoryRules.requiredReleaseNotes ? 'yes' : 'no'}`,
+            `- Required Discussion Evidence: ${workspace.repositoryRules.requiredDiscussionEvidence ? 'yes' : 'no'}`,
+            `- Missing Requirements: ${workspace.repositoryRules.missingRequirements.join(' | ') || 'none'}`,
+            `- Blocking Requirements: ${workspace.repositoryRules.blockingRequirements.join(' | ') || 'none'}`,
+          ]
+        : ['- None detected']),
+      '',
       '## Repo Memory',
       '',
       `- Generated Dossiers: ${memory.generatedDossiers}`,
@@ -323,7 +384,7 @@ export class ContentService {
       '',
       '## PR Draft',
       '',
-      this.formatPullRequestDraftMarkdown(prDraft),
+      this.formatPullRequestDraftMarkdown(prDraft, workspace.repositoryRules),
       '',
       `_Generated at ${new Date().toISOString()}_`,
       '',

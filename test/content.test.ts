@@ -8,6 +8,7 @@ import {
   createProofRecord,
   createPullRequestDraft,
   createRankedIssue,
+  createRepositoryRules,
   createRepositorySuggestion,
   createWorkspace,
 } from './helpers/factories.js';
@@ -40,6 +41,10 @@ describe('contentService', () => {
     expect(markdown).toContain('- `bun test` | Detected Bun tests | repo-script');
     expect(markdown).toContain('## Runnable Validation Commands');
     expect(markdown).toContain('## Validation Safety Notes');
+    expect(markdown).toContain('## Repository Contribution Rules');
+    expect(markdown).toContain('- PR Title Rule: Use a concise imperative title.');
+    expect(markdown).toContain('- Required Release Notes: no');
+    expect(markdown).toContain('- Required Discussion Evidence: no');
     expect(markdown).toContain('## Patch Draft');
     expect(markdown).toContain('## Goal');
     expect(markdown).toContain('Add accessible labels to icon-only buttons');
@@ -63,6 +68,37 @@ describe('contentService', () => {
     expect(markdown).toContain('## Summary');
     expect(markdown).toContain('## Changes');
     expect(markdown).toContain('## Validation');
+  });
+
+  test('uses template body when the PR draft already contains one', () => {
+    const markdown = contentService.formatPullRequestDraftBody(
+      createPullRequestDraft({
+        body: '## Template\n\n- [x] Linked issue',
+      }),
+    );
+
+    expect(markdown).toBe('## Template\n\n- [x] Linked issue');
+  });
+
+  test('fills repository PR template bodies when the draft body is absent', () => {
+    const markdown = contentService.formatPullRequestDraftBody(
+      createPullRequestDraft({
+        summary: 'Fix keyboard navigation for the settings menu.',
+        changes: ['Update menu focus management'],
+        validation: ['bun test'],
+        risks: ['Keyboard snapshots may change'],
+      }),
+      createRepositoryRules({
+        prTemplateBody: '## Summary\n\n{{summary}}\n\n## Changes\n\n{{changes}}\n\n## Validation\n\n{{validation}}',
+      }),
+    );
+
+    expect(markdown).toContain('## Summary');
+    expect(markdown).toContain('Fix keyboard navigation for the settings menu.');
+    expect(markdown).toContain('- Update menu focus management');
+    expect(markdown).toContain('- bun test');
+    expect(markdown).toContain('## Risks');
+    expect(markdown).toContain('- Keyboard snapshots may change');
   });
 
   test('formats repository analysis suggestions as markdown', () => {

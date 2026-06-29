@@ -6,6 +6,20 @@ import type { ImplementationDraft, MatchedIssue } from '../src/types/index.js';
 import { createIssue, createMemory, createRankedIssue, createWorkspace } from './helpers/factories.js';
 
 interface LLMServiceInternals {
+  extractRepositoryRules(
+    repoFullName: string,
+    files: Array<{ path: string; content: string }>,
+  ): Promise<{
+    detectedFiles: string[];
+    summary: string[];
+    requiredChecklistItems: string[];
+    requiredValidationNotes: string[];
+    requiresPriorDiscussion: boolean;
+    missingRequirements: string[];
+    blockingRequirements: string[];
+    requiredReleaseNotes: boolean;
+    requiredDiscussionEvidence: boolean;
+  }>;
   validateConnection(): Promise<boolean>;
   getLastValidationError(): string | null;
   generatePatchDraft(
@@ -80,6 +94,7 @@ interface LLMServiceInternals {
           model: string;
           messages: Array<{ role: string; content: string }>;
           temperature: number;
+          response_format?: { type: 'json_object' };
           reasoning_effort?: string;
           stream?: boolean;
           stream_options?: { include_usage?: boolean };
@@ -927,6 +942,59 @@ describe('LLMService pull request draft parsing', () => {
     expect(draft.status).toBe('success');
     expect(draft.data.title).toBe('Add aria-label handling to icon-only buttons');
     expect(draft.data.changes).toEqual(['Update the shared IconButton component']);
+  });
+
+  test('requests repository-rule extraction with json_object response formatting when supported', async () => {
+    const service = new LLMService() as unknown as LLMServiceInternals & {
+      initialize(
+        apiKey: string,
+        baseUrl: string,
+        modelName?: string,
+        apiHeaders?: Record<string, string>,
+        provider?: 'openai',
+      ): void;
+    };
+    const payloads: Array<{
+      response_format?: { type: 'json_object' };
+      messages: Array<{ role: string; content: string }>;
+    }> = [];
+
+    service.initialize('sk-test', 'https://api.openai.com/v1', 'gpt-4o-mini', {}, 'openai');
+    service.client = {
+      chat: {
+        completions: {
+          create: async (payload) => {
+            payloads.push(payload);
+            return {
+              choices: [
+                {
+                  message: {
+                    content: JSON.stringify({
+                      detectedFiles: ['CONTRIBUTING.md'],
+                      summary: ['Discuss changes before opening a PR'],
+                      requiredChecklistItems: [],
+                      requiredValidationNotes: [],
+                      requiresPriorDiscussion: true,
+                      missingRequirements: [],
+                      blockingRequirements: [],
+                      requiredReleaseNotes: false,
+                      requiredDiscussionEvidence: true,
+                    }),
+                  },
+                },
+              ],
+            };
+          },
+        },
+      },
+    };
+
+    const rules = await service.extractRepositoryRules('acme/demo', [
+      { path: 'CONTRIBUTING.md', content: 'Discuss major changes before opening a PR.' },
+    ]);
+
+    expect(rules.requiresPriorDiscussion).toBe(true);
+    expect(payloads[0]?.response_format).toEqual({ type: 'json_object' });
   });
 });
 

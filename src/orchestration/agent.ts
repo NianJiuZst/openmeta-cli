@@ -132,6 +132,7 @@ export interface MachineAgentResult {
   nextActions: string[];
   pullRequestUrl?: string;
   pullRequestNumber?: number;
+  reviewReason?: string;
 }
 
 interface TargetRepoContext {
@@ -147,6 +148,7 @@ interface ContributionPullRequestResult {
   number?: number;
   changedFiles: string[];
   validationResults: TestResult[];
+  reviewReason?: string;
 }
 
 interface ConcretePatchResult {
@@ -745,6 +747,7 @@ export class AgentOrchestrator {
       ...(patchDraftResult.status !== 'success' ? ['patch_draft_requires_review'] : []),
       ...(implementation.reviewRequired ? ['implementation_requires_review'] : []),
       ...(prDraftResult.status !== 'success' ? ['pr_draft_requires_review'] : []),
+      ...(contributionPullRequest.reviewReason ? ['repository_rules_blocked_pr'] : []),
       ...(contributionPullRequest.url
         ? []
         : implementation.changedFiles.length > 0
@@ -779,6 +782,7 @@ export class AgentOrchestrator {
         published: false,
         pullRequestUrl: contributionPullRequest.url,
         pullRequestNumber: contributionPullRequest.number,
+        reviewReason: contributionPullRequest.reviewReason,
       };
       const dossier = contentService.formatContributionDossier(
         selectedIssue,
@@ -843,6 +847,7 @@ export class AgentOrchestrator {
         published: publishResult.published,
         pullRequestUrl: contributionPullRequest.url,
         reviewRequired,
+        reviewReason: contributionPullRequest.reviewReason,
       });
       proofOfWorkService.record(finalProofRecord);
       const finalProofMarkdown = proofOfWorkService.renderMarkdown(proofOfWorkService.load().records);
@@ -898,6 +903,7 @@ export class AgentOrchestrator {
       implementationAttempts: implementation.implementationAttempts,
       implementationStopReason: implementation.implementationStopReason,
       implementationContextFilesAdded: implementation.implementationContextFilesAdded,
+      reviewReason: contributionPullRequest.reviewReason,
     };
   }
 
@@ -1236,6 +1242,7 @@ export class AgentOrchestrator {
       published: false,
       pullRequestUrl: contributionPullRequest.url,
       pullRequestNumber: contributionPullRequest.number,
+      reviewReason: contributionPullRequest.reviewReason,
     };
 
     const dossier = contentService.formatContributionDossier(
@@ -1319,6 +1326,7 @@ export class AgentOrchestrator {
       published: publishResult.published,
       pullRequestUrl: contributionPullRequest.url,
       reviewRequired,
+      reviewReason: contributionPullRequest.reviewReason,
     });
     proofOfWorkService.record(finalProofRecord);
     const finalProofMarkdown = proofOfWorkService.renderMarkdown(proofOfWorkService.load().records);
@@ -1754,6 +1762,11 @@ export class AgentOrchestrator {
       { label: 'Default branch', value: workspace.defaultBranch, tone: 'info' },
       { label: 'Working branch', value: workspace.branchName || 'workspace already dirty', tone: 'info' },
       { label: 'Top-level files', value: workspace.topLevelFiles.slice(0, 8).join(', ') || 'n/a', tone: 'info' },
+      {
+        label: 'Rule files',
+        value: workspace.repositoryRules?.detectedFiles.slice(0, 4).join(', ') || 'none',
+        tone: workspace.repositoryRules?.detectedFiles.length ? 'accent' : 'muted',
+      },
     ]);
 
     ui.recordList('Repository context', [
@@ -3048,6 +3061,31 @@ export class AgentOrchestrator {
 
     const hasValidationFailures = input.validationResults.some((result) => !result.passed);
     const hasBlockingValidationFailures = this.hasBlockingValidationFailures(input.validationResults);
+    const complianceFailures = this.evaluateRepositoryRuleCompliance(
+      input.issue,
+      input.prDraft,
+      input.workspace.repositoryRules,
+      input.validationResults,
+    );
+    if (complianceFailures.length > 0) {
+      ui.callout({
+        label: 'Rule Gate',
+        title: 'Repository rules blocked automatic PR creation',
+        subtitle:
+          'OpenMeta kept this run in review/artifact mode because the repository has contribution requirements that were not safely satisfied.',
+        lines: complianceFailures.map((reason) => `[Rule Gate] Blocked: ${reason}`),
+        tone: 'warning',
+      });
+      logger.warn(
+        `Skipping real draft PR creation because repository rules blocked automatic submission: ${complianceFailures.join(' | ')}`,
+      );
+      return {
+        changedFiles: input.changedFiles,
+        validationResults: input.validationResults,
+        reviewReason: complianceFailures.join(' | '),
+      };
+    }
+
     const prDecision = permissionPolicyService.evaluatePullRequest({
       allowRealPr: input.allowRealPr,
       headless: input.headless,
@@ -3082,6 +3120,7 @@ export class AgentOrchestrator {
         return {
           changedFiles: input.changedFiles,
           validationResults: input.validationResults,
+          reviewReason: 'User declined real draft PR creation.',
         };
       }
 
@@ -3091,6 +3130,7 @@ export class AgentOrchestrator {
           return {
             changedFiles: input.changedFiles,
             validationResults: input.validationResults,
+            reviewReason: 'Validation failures were not approved for PR creation.',
           };
         }
       }
@@ -3102,6 +3142,7 @@ export class AgentOrchestrator {
         prDraft: input.prDraft,
         workspacePath: input.workspace.workspacePath,
         changedFiles: input.changedFiles,
+        repositoryRules: input.workspace.repositoryRules,
       });
 
       ui.card({
@@ -3132,8 +3173,90 @@ export class AgentOrchestrator {
       return {
         changedFiles: input.changedFiles,
         validationResults: input.validationResults,
+        reviewReason: 'Real PR submission failed; kept artifacts only.',
       };
     }
+  }
+
+  private evaluateRepositoryRuleCompliance(
+    issue: RankedIssue,
+    prDraft: PullRequestDraft,
+    rules: RepoWorkspaceContext['repositoryRules'],
+    validationResults: TestResult[],
+  ): string[] {
+    if (!rules) {
+      return [];
+    }
+
+    const failures = [...rules.blockingRequirements];
+    const body = `${prDraft.body || ''}\n${prDraft.summary}\n${prDraft.changes.join('\n')}\n${prDraft.validation.join('\n')}`.toLowerCase();
+
+    if (rules.allowsDraftPr === false) {
+      failures.push('Repository rules do not encourage draft PRs for this workflow.');
+    }
+
+    if (rules.requiresPriorDiscussion || rules.requiredDiscussionEvidence) {
+      const hasDiscussionEvidence =
+        /discussed in|discussion:|linked discussion|maintainer approval|approved by|pre-approved|prior discussion/i.test(
+          issue.body || '',
+        ) ||
+        /discussed in|discussion:|linked discussion|maintainer approval|approved by|pre-approved|prior discussion/i.test(
+          body,
+        );
+      if (!hasDiscussionEvidence) {
+        failures.push('Repository requires prior discussion or maintainer approval evidence before opening a PR.');
+      }
+    }
+
+    if (rules.requiredIssueLinking) {
+      const hasIssueReference =
+        body.includes(`#${issue.number}`.toLowerCase()) ||
+        body.includes(issue.htmlUrl.toLowerCase()) ||
+        body.includes(`${issue.repoFullName}#${issue.number}`.toLowerCase());
+      if (!hasIssueReference) {
+        failures.push(`PR draft is missing the required issue linking format: ${rules.requiredIssueLinking}`);
+      }
+    }
+
+    if (rules.prTitleRule) {
+      const normalizedRule = rules.prTitleRule.toLowerCase();
+      if (
+        normalizedRule.includes('conventional') ||
+        /\b(feat|fix|docs|chore|refactor|test)(?:\([^)]+\))?:/.test(normalizedRule)
+      ) {
+        const conventionalTitle = /^(feat|fix|docs|chore|refactor|test)(\([^)]+\))?:\s+\S+/i.test(prDraft.title);
+        if (!conventionalTitle) {
+          failures.push(`PR title does not satisfy the repository rule: ${rules.prTitleRule}`);
+        }
+      }
+    }
+
+    if (rules.requiredValidationNotes.length > 0) {
+      const validationText = prDraft.validation.join('\n').toLowerCase();
+      for (const note of rules.requiredValidationNotes) {
+        const normalized = note.toLowerCase();
+        if (normalized.includes('test') && validationResults.length === 0) {
+          failures.push(`Repository expects validation notes such as "${note}" before opening a PR.`);
+          continue;
+        }
+        if (normalized.length > 8 && !validationText.includes(normalized.slice(0, Math.min(24, normalized.length)))) {
+          failures.push(`PR draft is missing required validation note: ${note}`);
+        }
+      }
+    }
+
+    if (rules.requiredChecklistItems.length > 0 && !(prDraft.body || '').trim()) {
+      failures.push('Repository requires checklist items, but the PR draft did not preserve a template body.');
+    }
+
+    if (rules.requiredReleaseNotes) {
+      const hasReleaseNote = /release note|release-notes|changelog|breaking change/i.test(body);
+      if (!hasReleaseNote) {
+        failures.push('Repository requires release note or changelog context before opening a PR.');
+      }
+    }
+
+    return [...new Set(failures)];
   }
 
   private async confirmManualHeadlessRun(config: AppConfig): Promise<void> {

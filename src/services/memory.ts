@@ -103,6 +103,7 @@ export class MemoryService {
         reviewRequired: issue.reviewRequired ?? false,
         status: issue.status ?? 'selected',
         validationSummary: issue.validationSummary ?? 'not run',
+        reviewReason: issue.reviewReason ?? '',
       })),
     };
   }
@@ -164,6 +165,7 @@ export class MemoryService {
     published: boolean;
     pullRequestUrl?: string;
     reviewRequired: boolean;
+    reviewReason?: string;
   }): RepoMemory {
     const current = this.load(input.issue.repoFullName);
     const now = new Date().toISOString();
@@ -213,6 +215,7 @@ export class MemoryService {
           reviewRequired: input.reviewRequired,
           validationSummary,
           pullRequestUrl: input.pullRequestUrl,
+          reviewReason: input.reviewReason,
         },
         ...current.recentIssues.filter((item) => item.reference !== issueReference),
       ].slice(0, 10),
@@ -291,7 +294,7 @@ export class MemoryService {
       ...(memory.recentIssues.length > 0
         ? memory.recentIssues.map(
             (issue) =>
-              `- ${issue.reference} | score ${issue.overallScore} | status ${issue.status} | changed ${issue.changedFiles.length} | published ${issue.published ? 'yes' : 'no'} | validation ${issue.validationSummary}`,
+              `- ${issue.reference} | score ${issue.overallScore} | status ${issue.status} | changed ${issue.changedFiles.length} | published ${issue.published ? 'yes' : 'no'} | validation ${issue.validationSummary}${issue.reviewReason ? ` | review ${issue.reviewReason}` : ''}`,
           )
         : ['- No issues recorded']),
       '',

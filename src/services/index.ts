@@ -19,6 +19,7 @@ export {
   type ResolvedRepositoryScope,
   repositoryTargetingService,
 } from './repository-targeting.js';
+export { RepositoryRulesService, repositoryRulesService } from './repository-rules.js';
 export { RunHistoryService, runHistoryService } from './run-history.js';
 export { type BinaryResolution, inspectBinaryOnPath } from './runtime-diagnostics.js';
 export type { SchedulerSyncResult } from './scheduler.js';

@@ -30,6 +30,7 @@ import {
   createProofRecord,
   createPullRequestDraft,
   createRankedIssue,
+  createRepositoryRules,
   createWorkspace,
 } from './helpers/factories.js';
 
@@ -525,7 +526,13 @@ describe('AgentOrchestrator support behavior', () => {
     const orchestrator = new AgentOrchestrator() as unknown as AgentOrchestratorInternals;
     const issue = createRankedIssue();
     const prDraft = createPullRequestDraft();
-    const workspace = createWorkspace();
+    const workspace = createWorkspace({
+      repositoryRules: createRepositoryRules({
+        requiredIssueLinking: undefined,
+        requiredValidationNotes: [],
+        requiredChecklistItems: [],
+      }),
+    });
 
     const headlessBlocked = await orchestrator.submitContributionPullRequestIfPossible({
       config: createConfig(),
@@ -574,7 +581,13 @@ describe('AgentOrchestrator support behavior', () => {
     const orchestrator = new AgentOrchestrator() as unknown as AgentOrchestratorInternals;
     const issue = createRankedIssue();
     const prDraft = createPullRequestDraft();
-    const workspace = createWorkspace();
+    const workspace = createWorkspace({
+      repositoryRules: createRepositoryRules({
+        requiredIssueLinking: undefined,
+        requiredValidationNotes: [],
+        requiredChecklistItems: [],
+      }),
+    });
     spyOn(infra, 'prompt').mockResolvedValue({ confirmPr: true });
 
     const submitSpy = spyOn(contributionPrService, 'submitDraftPullRequest')
