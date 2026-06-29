@@ -57,6 +57,35 @@ describe('ContributionPrService', () => {
     expect(parsed.body).toContain('## Changes');
   });
 
+  test('preserves finalized repository rule sections in the pull request payload', () => {
+    const parsed = contributionPrService.buildDraftPullRequest(
+      createPullRequestDraft({
+        body: [
+          '## Summary',
+          '',
+          'Accessibility fix only.',
+          '',
+          '## Related Issue',
+          '',
+          '- Related issue: acme/demo#42',
+          '- Link: https://github.com/acme/demo/issues/42',
+          '',
+          '## Release Notes',
+          '',
+          '- Accessibility fix only.',
+        ].join('\n'),
+      }),
+      createRepositoryRules({
+        requiredIssueLinking: 'Reference the GitHub issue in the PR body.',
+        requiredReleaseNotes: true,
+      }),
+    );
+
+    expect(parsed.body).toContain('## Related Issue');
+    expect(parsed.body).toContain('acme/demo#42');
+    expect(parsed.body).toContain('## Release Notes');
+  });
+
   test('builds bounded branch names and commit messages for generated contribution PRs', () => {
     const issue = createRankedIssue({
       repoFullName: 'acme/widgets',
@@ -76,6 +105,26 @@ describe('ContributionPrService', () => {
     expect(branchName).toMatch(/^fix\/42-fix-keyboard-focus-in-icon-only-+\d+$/);
     expect(commitMessage).toStartWith('fix: address acme/widgets#42 Fix keyboard focus');
     expect(commitMessage.length).toBeLessThanOrEqual(120);
+  });
+
+  test('reuses scoped commit headers and broader branch prefixes from repository rules', () => {
+    const issue = createRankedIssue({
+      repoFullName: 'acme/widgets',
+      number: 42,
+      title: 'Fix keyboard focus in icon-only widgets',
+    });
+
+    const branchName = contributionPrService.buildPublishBranchName(
+      issue,
+      createRepositoryRules({ branchNamingRule: 'Use bugfix/... branch names for bug fixes.' }),
+    );
+    const commitMessage = contributionPrService.buildContributionCommitMessage(
+      issue,
+      createRepositoryRules({ commitMessageRule: 'Use fix(accessibility): for accessibility bug-fix commits.' }),
+    );
+
+    expect(branchName).toMatch(/^bugfix\/42-fix-keyboard-focus-in-icon-only-+\d+$/);
+    expect(commitMessage).toStartWith('fix(accessibility): address acme/widgets#42');
   });
 
   test('submits a draft PR against an existing fork and reuses an open PR when present', async () => {

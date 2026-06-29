@@ -4,6 +4,7 @@ import { AgentOrchestrator } from '../src/orchestration/agent.js';
 import { AnalyzeOrchestrator } from '../src/orchestration/analyze.js';
 import {
   contentService,
+  contributionPrService,
   inboxService,
   issueRankingService,
   llmService,
@@ -352,7 +353,7 @@ describe('AgentOrchestrator run flow', () => {
 
     expect(result.url).toBeUndefined();
     expect(calloutSpy).toHaveBeenCalled();
-    expect(result.reviewReason).toContain('issue linking');
+    expect(result.reviewReason).toContain('associated issue link');
   });
 
   test('blocks PR creation when repository requires prior discussion evidence and none is present', async () => {
@@ -381,8 +382,13 @@ describe('AgentOrchestrator run flow', () => {
     expect(result.reviewReason).toContain('prior discussion');
   });
 
-  test('blocks PR creation when repository requires issue linking and release notes that the draft does not provide', async () => {
+  test('auto-fills issue linking and release notes before creating a PR when repository rules require them', async () => {
     const orchestrator = new AgentOrchestrator() as unknown as AgentRunInternals;
+    const submitSpy = spyOn(contributionPrService, 'submitDraftPullRequest').mockResolvedValue({
+      branchName: 'openmeta/agent-42',
+      url: 'https://github.com/acme/demo/pull/42',
+      number: 42,
+    });
 
     const result = await orchestrator.submitContributionPullRequestIfPossible({
       config: createConfig(),
@@ -403,9 +409,59 @@ describe('AgentOrchestrator run flow', () => {
       validationResults: [{ command: 'bun test', exitCode: 0, passed: true, output: 'ok' }],
     });
 
-    expect(result.url).toBeUndefined();
-    expect(result.reviewReason).toContain('issue linking');
-    expect(result.reviewReason).toContain('release note');
+    expect(result.url).toBe('https://github.com/acme/demo/pull/42');
+    expect(submitSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prDraft: expect.objectContaining({
+          body: expect.stringContaining('## Related Issue'),
+        }),
+      }),
+    );
+    expect(submitSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prDraft: expect.objectContaining({
+          body: expect.stringContaining('## Release Notes'),
+        }),
+      }),
+    );
+  });
+
+  test('auto-fills required checklist items into the finalized PR body before PR submission', async () => {
+    const orchestrator = new AgentOrchestrator() as unknown as AgentRunInternals;
+    const submitSpy = spyOn(contributionPrService, 'submitDraftPullRequest').mockResolvedValue({
+      branchName: 'openmeta/agent-42',
+      url: 'https://github.com/acme/demo/pull/42',
+      number: 42,
+    });
+
+    const result = await orchestrator.submitContributionPullRequestIfPossible({
+      config: createConfig(),
+      allowRealPr: true,
+      headless: true,
+      issue: createRankedIssue(),
+      prDraft: createPullRequestDraft({
+        body: '## Summary\n\nAccessibility fix only.',
+      }),
+      workspace: createWorkspace({
+        repositoryRules: createRepositoryRules({
+          prTemplateBody: undefined,
+          requiredChecklistItems: ['Sign off from maintainer'],
+          requiredIssueLinking: undefined,
+          requiredValidationNotes: [],
+        }),
+      }),
+      changedFiles: ['src/components/IconButton.tsx'],
+      validationResults: [],
+    });
+
+    expect(result.url).toBe('https://github.com/acme/demo/pull/42');
+    expect(submitSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prDraft: expect.objectContaining({
+          body: expect.stringContaining('Sign off from maintainer'),
+        }),
+      }),
+    );
   });
 
   test('blocks PR creation when repository requires a conventional PR title and the draft title does not match', async () => {
@@ -555,7 +611,10 @@ describe('AgentOrchestrator run flow', () => {
         issue,
         workspace: expect.objectContaining({ workspacePath: workspace.workspacePath }),
         patchDraft,
-        prDraft,
+        prDraft: expect.objectContaining({
+          title: prDraft.title,
+          summary: prDraft.summary,
+        }),
         pullRequestUrl: 'https://github.com/acme/demo/pull/42',
         changedFiles: ['src/app.ts'],
       }),

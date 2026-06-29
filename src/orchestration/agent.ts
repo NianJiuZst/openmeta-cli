@@ -426,9 +426,14 @@ export class AgentOrchestrator {
           },
           async () => llmService.generatePrDraft(syntheticIssue, patchDraft, workspaceForArtifacts),
         );
-        const prDraft = prDraftResult.data;
+        const prDraft = contentService.finalizePullRequestDraft(
+          prDraftResult.data,
+          syntheticIssue,
+          workspaceForArtifacts.repositoryRules,
+          implementation.validationResults,
+        );
         const patchDraftMarkdown = contentService.formatPatchDraftMarkdown(patchDraft);
-        const prDraftMarkdown = contentService.formatPullRequestDraftMarkdown(prDraft);
+        const prDraftMarkdown = contentService.formatPullRequestDraftMarkdown(prDraft, workspaceForArtifacts.repositoryRules);
         const contributionPullRequest = await ui.task(
           {
             title: 'Evaluating draft PR creation',
@@ -709,9 +714,14 @@ export class AgentOrchestrator {
       },
       async () => llmService.generatePrDraft(selectedIssue, patchDraft, workspaceForArtifacts),
     );
-    const prDraft = prDraftResult.data;
+    const prDraft = contentService.finalizePullRequestDraft(
+      prDraftResult.data,
+      selectedIssue,
+      workspaceForArtifacts.repositoryRules,
+      implementation.validationResults,
+    );
     const patchDraftMarkdown = contentService.formatPatchDraftMarkdown(patchDraft);
-    const prDraftMarkdown = contentService.formatPullRequestDraftMarkdown(prDraft);
+    const prDraftMarkdown = contentService.formatPullRequestDraftMarkdown(prDraft, workspaceForArtifacts.repositoryRules);
 
     const contributionPullRequest = await ui.task(
       {
@@ -1188,7 +1198,12 @@ export class AgentOrchestrator {
       },
       async () => llmService.generatePrDraft(selectedIssue, patchDraft, workspaceForArtifacts),
     );
-    const prDraft = prDraftResult.data;
+    const prDraft = contentService.finalizePullRequestDraft(
+      prDraftResult.data,
+      selectedIssue,
+      workspaceForArtifacts.repositoryRules,
+      implementation.validationResults,
+    );
     if (prDraftResult.status !== 'success') {
       this.showStructuredReviewNotice({
         title: 'PR narrative requires review',
@@ -1198,7 +1213,7 @@ export class AgentOrchestrator {
       });
     }
     const patchDraftMarkdown = contentService.formatPatchDraftMarkdown(patchDraft);
-    const prDraftMarkdown = contentService.formatPullRequestDraftMarkdown(prDraft);
+    const prDraftMarkdown = contentService.formatPullRequestDraftMarkdown(prDraft, workspaceForArtifacts.repositoryRules);
 
     const contributionPullRequest = await this.submitContributionPullRequestIfPossible({
       config,
@@ -2187,7 +2202,12 @@ export class AgentOrchestrator {
       },
       async () => llmService.generatePrDraft(selectedIssue, patchDraft, workspaceForArtifacts),
     );
-    const prDraft = prDraftResult.data;
+    const prDraft = contentService.finalizePullRequestDraft(
+      prDraftResult.data,
+      selectedIssue,
+      workspaceForArtifacts.repositoryRules,
+      implementation.validationResults,
+    );
     if (prDraftResult.status !== 'success') {
       this.showStructuredReviewNotice({
         title: 'PR narrative requires review',
@@ -2197,7 +2217,7 @@ export class AgentOrchestrator {
       });
     }
     const patchDraftMarkdown = contentService.formatPatchDraftMarkdown(patchDraft);
-    const prDraftMarkdown = contentService.formatPullRequestDraftMarkdown(prDraft);
+    const prDraftMarkdown = contentService.formatPullRequestDraftMarkdown(prDraft, workspaceForArtifacts.repositoryRules);
 
     const contributionPullRequest = await this.submitContributionPullRequestIfPossible({
       config: input.config,
@@ -3059,11 +3079,17 @@ export class AgentOrchestrator {
       };
     }
 
+    const finalizedPrDraft = contentService.finalizePullRequestDraft(
+      input.prDraft,
+      input.issue,
+      input.workspace.repositoryRules,
+      input.validationResults,
+    );
     const hasValidationFailures = input.validationResults.some((result) => !result.passed);
     const hasBlockingValidationFailures = this.hasBlockingValidationFailures(input.validationResults);
     const complianceFailures = this.evaluateRepositoryRuleCompliance(
       input.issue,
-      input.prDraft,
+      finalizedPrDraft,
       input.workspace.repositoryRules,
       input.validationResults,
     );
@@ -3139,7 +3165,7 @@ export class AgentOrchestrator {
     try {
       const contributionPullRequest = await contributionPrService.submitDraftPullRequest({
         issue: input.issue,
-        prDraft: input.prDraft,
+        prDraft: finalizedPrDraft,
         workspacePath: input.workspace.workspacePath,
         changedFiles: input.changedFiles,
         repositoryRules: input.workspace.repositoryRules,
@@ -3209,11 +3235,7 @@ export class AgentOrchestrator {
     }
 
     if (rules.requiredIssueLinking) {
-      const hasIssueReference =
-        body.includes(`#${issue.number}`.toLowerCase()) ||
-        body.includes(issue.htmlUrl.toLowerCase()) ||
-        body.includes(`${issue.repoFullName}#${issue.number}`.toLowerCase());
-      if (!hasIssueReference) {
+      if (!contentService.hasRequiredIssueLinking(prDraft.body || body, issue, rules.requiredIssueLinking)) {
         failures.push(`PR draft is missing the required issue linking format: ${rules.requiredIssueLinking}`);
       }
     }
@@ -3235,18 +3257,19 @@ export class AgentOrchestrator {
       const validationText = prDraft.validation.join('\n').toLowerCase();
       for (const note of rules.requiredValidationNotes) {
         const normalized = note.toLowerCase();
-        if (normalized.includes('test') && validationResults.length === 0) {
-          failures.push(`Repository expects validation notes such as "${note}" before opening a PR.`);
-          continue;
-        }
         if (normalized.length > 8 && !validationText.includes(normalized.slice(0, Math.min(24, normalized.length)))) {
           failures.push(`PR draft is missing required validation note: ${note}`);
         }
       }
     }
 
-    if (rules.requiredChecklistItems.length > 0 && !(prDraft.body || '').trim()) {
-      failures.push('Repository requires checklist items, but the PR draft did not preserve a template body.');
+    if (
+      rules.requiredChecklistItems.length > 0 &&
+      !contentService.hasRequiredChecklistItems(prDraft.body || body, rules.requiredChecklistItems)
+    ) {
+      failures.push(
+        `PR draft is missing required checklist items: ${rules.requiredChecklistItems.join(' | ')}`,
+      );
     }
 
     if (rules.requiredReleaseNotes) {

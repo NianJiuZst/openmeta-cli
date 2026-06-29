@@ -82,15 +82,19 @@ export class ContributionPrService {
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '')
       .slice(0, 32);
-    const explicitPrefix = rules?.branchNamingRule?.match(/(feature|feat|fix|docs|chore|refactor|test)\//i)?.[0];
+    const branchRule = rules?.branchNamingRule;
+    const slashPrefix = branchRule?.match(/([a-z][a-z0-9_-]*)\//i)?.[0];
+    const keywordPrefix = branchRule?.match(/\b(feature|feat|fix|docs|chore|refactor|test|bugfix)\b/i)?.[0];
+    const explicitPrefix = slashPrefix || (keywordPrefix ? `${keywordPrefix.toLowerCase()}/` : undefined);
     const prefix = explicitPrefix || 'openmeta/agent-';
     return `${prefix}${issue.number}-${slug || 'issue'}-${Date.now()}`;
   }
 
   buildContributionCommitMessage(issue: RankedIssue, rules?: RepositoryContributionRules): string {
-    const conventionalType =
-      rules?.commitMessageRule?.match(/\b(feat|fix|docs|chore|refactor|test)(?:\([^)]+\))?:/i)?.[1] || 'feat';
-    return `${conventionalType}: address ${issue.repoFullName}#${issue.number} ${issue.title}`.slice(0, 120);
+    const conventionalHeader =
+      rules?.commitMessageRule?.match(/\b(feat|fix|docs|chore|refactor|test)(\([^)]+\))?:/i)?.[0] || 'feat:';
+    const header = conventionalHeader.endsWith(':') ? conventionalHeader.slice(0, -1) : conventionalHeader;
+    return `${header}: address ${issue.repoFullName}#${issue.number} ${issue.title}`.slice(0, 120);
   }
 
   private async getUpstreamRepositoryContext(issue: RankedIssue): Promise<ContributionRepositoryContext> {

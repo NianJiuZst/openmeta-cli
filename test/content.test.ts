@@ -101,6 +101,67 @@ describe('contentService', () => {
     expect(markdown).toContain('- Keyboard snapshots may change');
   });
 
+  test('finalizes PR drafts with required issue links, validation notes, and release notes', () => {
+    const issue = createRankedIssue();
+    const finalized = contentService.finalizePullRequestDraft(
+      createPullRequestDraft({
+        body: '## Summary\n\nAccessibility fix only.',
+        validation: [],
+        risks: [],
+      }),
+      issue,
+      createRepositoryRules({
+        requiredIssueLinking: 'Reference the GitHub issue in the PR body.',
+        requiredValidationNotes: ['Mention whether bun test passed'],
+        requiredReleaseNotes: true,
+      }),
+      [{ command: 'bun test', exitCode: 0, passed: true, output: 'ok' }],
+    );
+
+    expect(finalized.validation).toContain('Mention whether bun test passed: bun test passed');
+    expect(finalized.body).toContain('## Related Issue');
+    expect(finalized.body).toContain('acme/demo#42');
+    expect(finalized.body).toContain('https://github.com/acme/demo/issues/42');
+    expect(finalized.body).toContain('## Validation Notes');
+    expect(finalized.body).toContain('Mention whether bun test passed: bun test passed');
+    expect(finalized.body).toContain('## Release Notes');
+  });
+
+  test('finalizes PR drafts with explicit closing issue format when required', () => {
+    const issue = createRankedIssue();
+    const finalized = contentService.finalizePullRequestDraft(
+      createPullRequestDraft({
+        body: '## Summary\n\nAccessibility fix only.',
+      }),
+      issue,
+      createRepositoryRules({
+        requiredIssueLinking: 'Use Fixes #123 in the PR body.',
+      }),
+    );
+
+    expect(finalized.body).toContain('Fixes acme/demo#42');
+    expect(contentService.hasRequiredIssueLinking(finalized.body, issue, 'Use Fixes #123 in the PR body.')).toBe(true);
+  });
+
+  test('finalizes PR drafts for synthetic repository suggestions without fake issue numbers', () => {
+    const finalized = contentService.finalizePullRequestDraft(
+      createPullRequestDraft({
+        body: '## Summary\n\nRepository improvement.',
+      }),
+      createRankedIssue({
+        number: 0,
+        htmlUrl: 'https://github.com/acme/demo',
+      }),
+      createRepositoryRules({
+        requiredIssueLinking: 'Link the related issue or repository context in the PR body.',
+      }),
+    );
+
+    expect(finalized.body).toContain('## Related Issue');
+    expect(finalized.body).toContain('https://github.com/acme/demo');
+    expect(finalized.body).not.toContain('acme/demo#0');
+  });
+
   test('formats repository analysis suggestions as markdown', () => {
     const selectedSuggestion = createRepositorySuggestion({
       id: 'config-validation',
