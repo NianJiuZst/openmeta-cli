@@ -5,8 +5,8 @@ import type {
   MatchedIssue,
   ProofOfWorkRecord,
   RankedIssue,
-  RepositoryContributionRules,
   RepoMemory,
+  RepositoryContributionRules,
   RepoWorkspaceContext,
 } from '../../src/types/index.js';
 

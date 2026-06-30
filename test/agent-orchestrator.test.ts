@@ -63,6 +63,7 @@ interface AgentOrchestratorInternals {
     number?: number;
     changedFiles: string[];
     validationResults: TestResult[];
+    reviewReason?: string;
   }>;
   publishArtifactsIfNeeded(input: {
     config: AppConfig;

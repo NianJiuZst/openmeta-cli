@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import { z } from 'zod';
+import type { z } from 'zod';
 import {
   ImplementationDraftEnvelopeSchema,
   type IssueFeasibilityAssessment,
@@ -28,9 +28,9 @@ import {
   PATCH_DRAFT_PROMPT,
   PATCH_DRAFT_REPAIR_PROMPT,
   PR_DRAFT_PROMPT,
-  REPOSITORY_RULES_PROMPT,
   REPOSITORY_ANALYSIS_PROMPT,
   REPOSITORY_ANALYSIS_REPAIR_PROMPT,
+  REPOSITORY_RULES_PROMPT,
   VALIDATION_REPAIR_PROMPT,
 } from '../infra/prompt-templates.js';
 import type {
@@ -665,7 +665,6 @@ Repo Stars: ${i.repoStars}`,
       `Blocking Requirements: ${rules.blockingRequirements.join(' | ') || 'none'}`,
     ].join('\n');
   }
-
 
   private describeValidationError(error: unknown): string {
     if (this.isAbortError(error)) {

@@ -7,8 +7,8 @@ import type {
   MatchedIssue,
   ProofOfWorkRecord,
   RankedIssue,
-  RepositoryContributionRules,
   RepoMemory,
+  RepositoryContributionRules,
   RepoWorkspaceContext,
   TestResult,
 } from '../types/index.js';
@@ -50,7 +50,11 @@ export class ContentService {
     rules?: RepositoryContributionRules,
     validationResults: TestResult[] = [],
   ): PullRequestDraft {
-    const validation = this.mergeRequiredValidationNotes(draft.validation, rules?.requiredValidationNotes, validationResults);
+    const validation = this.mergeRequiredValidationNotes(
+      draft.validation,
+      rules?.requiredValidationNotes,
+      validationResults,
+    );
     let body = this.buildPullRequestDraftBody({ ...draft, validation }, rules);
 
     body = this.ensureChecklistItems(body, rules?.requiredChecklistItems);
@@ -264,11 +268,7 @@ export class ContentService {
       return body;
     }
 
-    return this.appendSection(
-      body,
-      'Checklist',
-      missingItems.map((item) => `- [ ] ${item}`).join('\n'),
-    );
+    return this.appendSection(body, 'Checklist', missingItems.map((item) => `- [ ] ${item}`).join('\n'));
   }
 
   private ensureIssueLinking(body: string, issue: RankedIssue, requirement?: string): string {

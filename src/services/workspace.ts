@@ -579,7 +579,6 @@ export class WorkspaceService {
         }
 
         files.push(normalizeRepoRelativePath(relative(root, join(current, entry.name))));
-        files.push(normalizeRepoRelativePath(relative(root, join(current, entry.name))));
         if (files.length >= MAX_DISCOVERED_FILES) {
           break;
         }

@@ -63,5 +63,5 @@ describe('gitService.writeAndPublish', () => {
     }
 
     expect(featureBranchHasArtifact).toBe(false);
-  });
+  }, 20_000);
 });

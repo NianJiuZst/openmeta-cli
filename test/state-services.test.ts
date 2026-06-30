@@ -223,7 +223,9 @@ describe('stateful services', () => {
   });
 
   test('proof-of-work service records PR links in markdown output', () => {
-    const records = proofOfWorkService.record(createProofRecord({ reviewReason: 'Repository rules blocked PR opening.' }));
+    const records = proofOfWorkService.record(
+      createProofRecord({ reviewReason: 'Repository rules blocked PR opening.' }),
+    );
     const markdown = proofOfWorkService.renderMarkdown(records);
 
     expect(records).toHaveLength(1);

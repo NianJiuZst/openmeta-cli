@@ -433,7 +433,10 @@ export class AgentOrchestrator {
           implementation.validationResults,
         );
         const patchDraftMarkdown = contentService.formatPatchDraftMarkdown(patchDraft);
-        const prDraftMarkdown = contentService.formatPullRequestDraftMarkdown(prDraft, workspaceForArtifacts.repositoryRules);
+        const prDraftMarkdown = contentService.formatPullRequestDraftMarkdown(
+          prDraft,
+          workspaceForArtifacts.repositoryRules,
+        );
         const contributionPullRequest = await ui.task(
           {
             title: 'Evaluating draft PR creation',
@@ -721,7 +724,10 @@ export class AgentOrchestrator {
       implementation.validationResults,
     );
     const patchDraftMarkdown = contentService.formatPatchDraftMarkdown(patchDraft);
-    const prDraftMarkdown = contentService.formatPullRequestDraftMarkdown(prDraft, workspaceForArtifacts.repositoryRules);
+    const prDraftMarkdown = contentService.formatPullRequestDraftMarkdown(
+      prDraft,
+      workspaceForArtifacts.repositoryRules,
+    );
 
     const contributionPullRequest = await ui.task(
       {
@@ -1213,7 +1219,10 @@ export class AgentOrchestrator {
       });
     }
     const patchDraftMarkdown = contentService.formatPatchDraftMarkdown(patchDraft);
-    const prDraftMarkdown = contentService.formatPullRequestDraftMarkdown(prDraft, workspaceForArtifacts.repositoryRules);
+    const prDraftMarkdown = contentService.formatPullRequestDraftMarkdown(
+      prDraft,
+      workspaceForArtifacts.repositoryRules,
+    );
 
     const contributionPullRequest = await this.submitContributionPullRequestIfPossible({
       config,
@@ -2217,7 +2226,10 @@ export class AgentOrchestrator {
       });
     }
     const patchDraftMarkdown = contentService.formatPatchDraftMarkdown(patchDraft);
-    const prDraftMarkdown = contentService.formatPullRequestDraftMarkdown(prDraft, workspaceForArtifacts.repositoryRules);
+    const prDraftMarkdown = contentService.formatPullRequestDraftMarkdown(
+      prDraft,
+      workspaceForArtifacts.repositoryRules,
+    );
 
     const contributionPullRequest = await this.submitContributionPullRequestIfPossible({
       config: input.config,
@@ -3091,7 +3103,6 @@ export class AgentOrchestrator {
       input.issue,
       finalizedPrDraft,
       input.workspace.repositoryRules,
-      input.validationResults,
     );
     if (complianceFailures.length > 0) {
       ui.callout({
@@ -3208,14 +3219,14 @@ export class AgentOrchestrator {
     issue: RankedIssue,
     prDraft: PullRequestDraft,
     rules: RepoWorkspaceContext['repositoryRules'],
-    validationResults: TestResult[],
   ): string[] {
     if (!rules) {
       return [];
     }
 
     const failures = [...rules.blockingRequirements];
-    const body = `${prDraft.body || ''}\n${prDraft.summary}\n${prDraft.changes.join('\n')}\n${prDraft.validation.join('\n')}`.toLowerCase();
+    const body =
+      `${prDraft.body || ''}\n${prDraft.summary}\n${prDraft.changes.join('\n')}\n${prDraft.validation.join('\n')}`.toLowerCase();
 
     if (rules.allowsDraftPr === false) {
       failures.push('Repository rules do not encourage draft PRs for this workflow.');
@@ -3267,9 +3278,7 @@ export class AgentOrchestrator {
       rules.requiredChecklistItems.length > 0 &&
       !contentService.hasRequiredChecklistItems(prDraft.body || body, rules.requiredChecklistItems)
     ) {
-      failures.push(
-        `PR draft is missing required checklist items: ${rules.requiredChecklistItems.join(' | ')}`,
-      );
+      failures.push(`PR draft is missing required checklist items: ${rules.requiredChecklistItems.join(' | ')}`);
     }
 
     if (rules.requiredReleaseNotes) {

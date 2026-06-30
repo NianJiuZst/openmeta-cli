@@ -63,6 +63,7 @@ interface AgentRunInternals {
     number?: number;
     changedFiles: string[];
     validationResults: ReturnType<typeof createWorkspace>['testResults'];
+    reviewReason?: string;
   }>;
   publishArtifactsIfNeeded(input: unknown): Promise<{ published: boolean }>;
   prepareLocalArtifactPaths(issue: RankedIssue): ContributionAgentResult['artifacts'];

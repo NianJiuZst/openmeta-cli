@@ -140,7 +140,8 @@ describe('contentService', () => {
     );
 
     expect(finalized.body).toContain('Fixes acme/demo#42');
-    expect(contentService.hasRequiredIssueLinking(finalized.body, issue, 'Use Fixes #123 in the PR body.')).toBe(true);
+    expect(finalized.body).toBeDefined();
+    expect(contentService.hasRequiredIssueLinking(finalized.body!, issue, 'Use Fixes #123 in the PR body.')).toBe(true);
   });
 
   test('finalizes PR drafts for synthetic repository suggestions without fake issue numbers', () => {

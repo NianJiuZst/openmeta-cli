@@ -233,6 +233,7 @@ describe('workspaceService.detectTestCommands', () => {
           candidateFiles: string[];
           snippets: Array<{ path: string; content: string }>;
           testCommands: Array<{ command: string }>;
+          repositoryRules?: { detectedFiles: string[] };
         }>;
       };
       const originalBuildRepoUrl = service.buildRepoUrl;

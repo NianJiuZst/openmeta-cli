@@ -14,12 +14,12 @@ export { MemoryService, memoryService } from './memory.js';
 export { OpportunityService, opportunityService } from './opportunity.js';
 export { PermissionPolicyService, permissionPolicyService } from './permission-policy.js';
 export { ProofOfWorkService, proofOfWorkService } from './proof-of-work.js';
+export { RepositoryRulesService, repositoryRulesService } from './repository-rules.js';
 export {
   RepositoryTargetingService,
   type ResolvedRepositoryScope,
   repositoryTargetingService,
 } from './repository-targeting.js';
-export { RepositoryRulesService, repositoryRulesService } from './repository-rules.js';
 export { RunHistoryService, runHistoryService } from './run-history.js';
 export { type BinaryResolution, inspectBinaryOnPath } from './runtime-diagnostics.js';
 export type { SchedulerSyncResult } from './scheduler.js';

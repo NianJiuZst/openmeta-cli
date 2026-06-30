@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'fs';
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'fs';
 import { join, relative, resolve } from 'path';
 import type { RepositoryContributionRules as StructuredRepositoryContributionRules } from '../contracts/index.js';
 import { RepositoryContributionRulesSchema } from '../contracts/index.js';
@@ -157,7 +157,9 @@ export class RepositoryRulesService {
         raw.detectedFiles.length === currentEntries.length &&
         raw.detectedFiles.every((entry, index) => {
           const current = currentEntries[index];
-          return current && current.path === entry.path && current.mtimeMs === entry.mtimeMs && current.size === entry.size;
+          return (
+            current && current.path === entry.path && current.mtimeMs === entry.mtimeMs && current.size === entry.size
+          );
         });
       return matches ? raw : null;
     } catch (error) {
