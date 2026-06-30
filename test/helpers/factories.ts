@@ -6,6 +6,7 @@ import type {
   ProofOfWorkRecord,
   RankedIssue,
   RepoMemory,
+  RepositoryContributionRules,
   RepoWorkspaceContext,
 } from '../../src/types/index.js';
 
@@ -96,6 +97,30 @@ export function createWorkspace(overrides: Partial<RepoWorkspaceContext> = {}): 
       'Skipped bun test during headless validation because it comes from repository-defined scripts.',
     ],
     testResults: [{ command: 'bun test', exitCode: 0, passed: true, output: '2 passed' }],
+    repositoryRules: createRepositoryRules(),
+    ...overrides,
+  };
+}
+
+export function createRepositoryRules(
+  overrides: Partial<RepositoryContributionRules> = {},
+): RepositoryContributionRules {
+  return {
+    detectedFiles: ['CONTRIBUTING.md', '.github/PULL_REQUEST_TEMPLATE.md'],
+    summary: ['Use the PR template', 'Include issue references in PRs'],
+    prTemplateBody: '## Summary\n\n## Checklist\n- [ ] Tests',
+    prTitleRule: 'Use a concise imperative title.',
+    commitMessageRule: 'Use conventional commits, e.g. feat: ...',
+    branchNamingRule: 'Use fix/... branch names for bug fixes.',
+    requiredChecklistItems: ['Confirm tests ran'],
+    requiredValidationNotes: ['Mention whether bun test passed'],
+    requiredIssueLinking: 'Reference the GitHub issue in the PR body.',
+    allowsDraftPr: true,
+    requiresPriorDiscussion: false,
+    missingRequirements: [],
+    blockingRequirements: [],
+    requiredReleaseNotes: false,
+    requiredDiscussionEvidence: false,
     ...overrides,
   };
 }
@@ -197,6 +222,7 @@ export function createPullRequestDraft(overrides: Partial<PullRequestDraft> = {}
     ],
     validation: ['bun test (pending)'],
     risks: ['Consumers may need to update snapshots that cover button rendering'],
+    body: undefined,
     ...overrides,
   };
 }
@@ -254,6 +280,7 @@ export function createProofRecord(overrides: Partial<ProofOfWorkRecord> = {}): P
     published: true,
     pullRequestUrl: 'https://github.com/acme/demo/pull/123',
     pullRequestNumber: 123,
+    reviewReason: '',
     ...overrides,
   };
 }

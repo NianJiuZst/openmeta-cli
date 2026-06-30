@@ -4,6 +4,7 @@ import { AgentOrchestrator } from '../src/orchestration/agent.js';
 import { AnalyzeOrchestrator } from '../src/orchestration/analyze.js';
 import {
   contentService,
+  contributionPrService,
   inboxService,
   issueRankingService,
   llmService,
@@ -19,6 +20,7 @@ import {
   createProofRecord,
   createPullRequestDraft,
   createRankedIssue,
+  createRepositoryRules,
   createRepositorySuggestion,
   createWorkspace,
 } from './helpers/factories.js';
@@ -61,6 +63,7 @@ interface AgentRunInternals {
     number?: number;
     changedFiles: string[];
     validationResults: ReturnType<typeof createWorkspace>['testResults'];
+    reviewReason?: string;
   }>;
   publishArtifactsIfNeeded(input: unknown): Promise<{ published: boolean }>;
   prepareLocalArtifactPaths(issue: RankedIssue): ContributionAgentResult['artifacts'];
@@ -330,6 +333,164 @@ describe('AgentOrchestrator run flow', () => {
     );
   });
 
+  test('keeps the run in artifact mode when repository rules block automatic PR creation', async () => {
+    const orchestrator = new AgentOrchestrator() as unknown as AgentRunInternals;
+    const calloutSpy = spyOn(infra.ui, 'callout').mockImplementation(() => {});
+
+    const result = await orchestrator.submitContributionPullRequestIfPossible({
+      config: createConfig(),
+      allowRealPr: true,
+      headless: true,
+      issue: createRankedIssue(),
+      prDraft: createPullRequestDraft(),
+      workspace: createWorkspace({
+        repositoryRules: createRepositoryRules({
+          blockingRequirements: ['Repository requires an associated issue link before raising a PR.'],
+        }),
+      }),
+      changedFiles: ['src/components/IconButton.tsx'],
+      validationResults: [],
+    });
+
+    expect(result.url).toBeUndefined();
+    expect(calloutSpy).toHaveBeenCalled();
+    expect(result.reviewReason).toContain('associated issue link');
+  });
+
+  test('blocks PR creation when repository requires prior discussion evidence and none is present', async () => {
+    const orchestrator = new AgentOrchestrator() as unknown as AgentRunInternals;
+
+    const result = await orchestrator.submitContributionPullRequestIfPossible({
+      config: createConfig(),
+      allowRealPr: true,
+      headless: true,
+      issue: createRankedIssue({ body: 'Bug report without maintainer discussion.' }),
+      prDraft: createPullRequestDraft(),
+      workspace: createWorkspace({
+        repositoryRules: createRepositoryRules({
+          requiredIssueLinking: undefined,
+          requiredValidationNotes: [],
+          requiredChecklistItems: [],
+          requiresPriorDiscussion: true,
+          requiredDiscussionEvidence: true,
+        }),
+      }),
+      changedFiles: ['src/components/IconButton.tsx'],
+      validationResults: [],
+    });
+
+    expect(result.url).toBeUndefined();
+    expect(result.reviewReason).toContain('prior discussion');
+  });
+
+  test('auto-fills issue linking and release notes before creating a PR when repository rules require them', async () => {
+    const orchestrator = new AgentOrchestrator() as unknown as AgentRunInternals;
+    const submitSpy = spyOn(contributionPrService, 'submitDraftPullRequest').mockResolvedValue({
+      branchName: 'openmeta/agent-42',
+      url: 'https://github.com/acme/demo/pull/42',
+      number: 42,
+    });
+
+    const result = await orchestrator.submitContributionPullRequestIfPossible({
+      config: createConfig(),
+      allowRealPr: true,
+      headless: true,
+      issue: createRankedIssue(),
+      prDraft: createPullRequestDraft({
+        body: '## Summary\n\nAccessibility fix only.',
+        validation: ['bun test passed'],
+      }),
+      workspace: createWorkspace({
+        repositoryRules: createRepositoryRules({
+          requiredIssueLinking: 'Reference the GitHub issue in the PR body.',
+          requiredReleaseNotes: true,
+        }),
+      }),
+      changedFiles: ['src/components/IconButton.tsx'],
+      validationResults: [{ command: 'bun test', exitCode: 0, passed: true, output: 'ok' }],
+    });
+
+    expect(result.url).toBe('https://github.com/acme/demo/pull/42');
+    expect(submitSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prDraft: expect.objectContaining({
+          body: expect.stringContaining('## Related Issue'),
+        }),
+      }),
+    );
+    expect(submitSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prDraft: expect.objectContaining({
+          body: expect.stringContaining('## Release Notes'),
+        }),
+      }),
+    );
+  });
+
+  test('auto-fills required checklist items into the finalized PR body before PR submission', async () => {
+    const orchestrator = new AgentOrchestrator() as unknown as AgentRunInternals;
+    const submitSpy = spyOn(contributionPrService, 'submitDraftPullRequest').mockResolvedValue({
+      branchName: 'openmeta/agent-42',
+      url: 'https://github.com/acme/demo/pull/42',
+      number: 42,
+    });
+
+    const result = await orchestrator.submitContributionPullRequestIfPossible({
+      config: createConfig(),
+      allowRealPr: true,
+      headless: true,
+      issue: createRankedIssue(),
+      prDraft: createPullRequestDraft({
+        body: '## Summary\n\nAccessibility fix only.',
+      }),
+      workspace: createWorkspace({
+        repositoryRules: createRepositoryRules({
+          prTemplateBody: undefined,
+          requiredChecklistItems: ['Sign off from maintainer'],
+          requiredIssueLinking: undefined,
+          requiredValidationNotes: [],
+        }),
+      }),
+      changedFiles: ['src/components/IconButton.tsx'],
+      validationResults: [],
+    });
+
+    expect(result.url).toBe('https://github.com/acme/demo/pull/42');
+    expect(submitSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prDraft: expect.objectContaining({
+          body: expect.stringContaining('Sign off from maintainer'),
+        }),
+      }),
+    );
+  });
+
+  test('blocks PR creation when repository requires a conventional PR title and the draft title does not match', async () => {
+    const orchestrator = new AgentOrchestrator() as unknown as AgentRunInternals;
+
+    const result = await orchestrator.submitContributionPullRequestIfPossible({
+      config: createConfig(),
+      allowRealPr: true,
+      headless: true,
+      issue: createRankedIssue(),
+      prDraft: createPullRequestDraft({
+        title: 'Add aria-label handling to icon-only buttons',
+      }),
+      workspace: createWorkspace({
+        repositoryRules: createRepositoryRules({
+          prTitleRule: 'Use conventional commit style titles such as fix(scope): ...',
+          requiredIssueLinking: undefined,
+          requiredValidationNotes: [],
+        }),
+      }),
+      changedFiles: ['src/components/IconButton.tsx'],
+      validationResults: [],
+    });
+
+    expect(result.url).toBeUndefined();
+    expect(result.reviewReason).toContain('PR title');
+  });
+
   test('runs the full interactive flow and records a published outcome', async () => {
     const orchestrator = new AgentOrchestrator() as unknown as AgentRunInternals;
     const config = createConfig();
@@ -451,7 +612,10 @@ describe('AgentOrchestrator run flow', () => {
         issue,
         workspace: expect.objectContaining({ workspacePath: workspace.workspacePath }),
         patchDraft,
-        prDraft,
+        prDraft: expect.objectContaining({
+          title: prDraft.title,
+          summary: prDraft.summary,
+        }),
         pullRequestUrl: 'https://github.com/acme/demo/pull/42',
         changedFiles: ['src/app.ts'],
       }),

@@ -8,6 +8,7 @@ import {
   createProofRecord,
   createPullRequestDraft,
   createRankedIssue,
+  createRepositoryRules,
   createRepositorySuggestion,
   createWorkspace,
 } from './helpers/factories.js';
@@ -40,6 +41,10 @@ describe('contentService', () => {
     expect(markdown).toContain('- `bun test` | Detected Bun tests | repo-script');
     expect(markdown).toContain('## Runnable Validation Commands');
     expect(markdown).toContain('## Validation Safety Notes');
+    expect(markdown).toContain('## Repository Contribution Rules');
+    expect(markdown).toContain('- PR Title Rule: Use a concise imperative title.');
+    expect(markdown).toContain('- Required Release Notes: no');
+    expect(markdown).toContain('- Required Discussion Evidence: no');
     expect(markdown).toContain('## Patch Draft');
     expect(markdown).toContain('## Goal');
     expect(markdown).toContain('Add accessible labels to icon-only buttons');
@@ -63,6 +68,99 @@ describe('contentService', () => {
     expect(markdown).toContain('## Summary');
     expect(markdown).toContain('## Changes');
     expect(markdown).toContain('## Validation');
+  });
+
+  test('uses template body when the PR draft already contains one', () => {
+    const markdown = contentService.formatPullRequestDraftBody(
+      createPullRequestDraft({
+        body: '## Template\n\n- [x] Linked issue',
+      }),
+    );
+
+    expect(markdown).toBe('## Template\n\n- [x] Linked issue');
+  });
+
+  test('fills repository PR template bodies when the draft body is absent', () => {
+    const markdown = contentService.formatPullRequestDraftBody(
+      createPullRequestDraft({
+        summary: 'Fix keyboard navigation for the settings menu.',
+        changes: ['Update menu focus management'],
+        validation: ['bun test'],
+        risks: ['Keyboard snapshots may change'],
+      }),
+      createRepositoryRules({
+        prTemplateBody: '## Summary\n\n{{summary}}\n\n## Changes\n\n{{changes}}\n\n## Validation\n\n{{validation}}',
+      }),
+    );
+
+    expect(markdown).toContain('## Summary');
+    expect(markdown).toContain('Fix keyboard navigation for the settings menu.');
+    expect(markdown).toContain('- Update menu focus management');
+    expect(markdown).toContain('- bun test');
+    expect(markdown).toContain('## Risks');
+    expect(markdown).toContain('- Keyboard snapshots may change');
+  });
+
+  test('finalizes PR drafts with required issue links, validation notes, and release notes', () => {
+    const issue = createRankedIssue();
+    const finalized = contentService.finalizePullRequestDraft(
+      createPullRequestDraft({
+        body: '## Summary\n\nAccessibility fix only.',
+        validation: [],
+        risks: [],
+      }),
+      issue,
+      createRepositoryRules({
+        requiredIssueLinking: 'Reference the GitHub issue in the PR body.',
+        requiredValidationNotes: ['Mention whether bun test passed'],
+        requiredReleaseNotes: true,
+      }),
+      [{ command: 'bun test', exitCode: 0, passed: true, output: 'ok' }],
+    );
+
+    expect(finalized.validation).toContain('Mention whether bun test passed: bun test passed');
+    expect(finalized.body).toContain('## Related Issue');
+    expect(finalized.body).toContain('acme/demo#42');
+    expect(finalized.body).toContain('https://github.com/acme/demo/issues/42');
+    expect(finalized.body).toContain('## Validation Notes');
+    expect(finalized.body).toContain('Mention whether bun test passed: bun test passed');
+    expect(finalized.body).toContain('## Release Notes');
+  });
+
+  test('finalizes PR drafts with explicit closing issue format when required', () => {
+    const issue = createRankedIssue();
+    const finalized = contentService.finalizePullRequestDraft(
+      createPullRequestDraft({
+        body: '## Summary\n\nAccessibility fix only.',
+      }),
+      issue,
+      createRepositoryRules({
+        requiredIssueLinking: 'Use Fixes #123 in the PR body.',
+      }),
+    );
+
+    expect(finalized.body).toContain('Fixes acme/demo#42');
+    expect(finalized.body).toBeDefined();
+    expect(contentService.hasRequiredIssueLinking(finalized.body!, issue, 'Use Fixes #123 in the PR body.')).toBe(true);
+  });
+
+  test('finalizes PR drafts for synthetic repository suggestions without fake issue numbers', () => {
+    const finalized = contentService.finalizePullRequestDraft(
+      createPullRequestDraft({
+        body: '## Summary\n\nRepository improvement.',
+      }),
+      createRankedIssue({
+        number: 0,
+        htmlUrl: 'https://github.com/acme/demo',
+      }),
+      createRepositoryRules({
+        requiredIssueLinking: 'Link the related issue or repository context in the PR body.',
+      }),
+    );
+
+    expect(finalized.body).toContain('## Related Issue');
+    expect(finalized.body).toContain('https://github.com/acme/demo');
+    expect(finalized.body).not.toContain('acme/demo#0');
   });
 
   test('formats repository analysis suggestions as markdown', () => {

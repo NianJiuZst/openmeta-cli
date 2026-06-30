@@ -1,12 +1,14 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { ConfigService } from '../src/infra/config.js';
 import { agentEventLogService } from '../src/services/agent-event-log.js';
 import { inboxService } from '../src/services/inbox.js';
+import { llmService } from '../src/services/index.js';
 import { memoryService } from '../src/services/memory.js';
 import { proofOfWorkService } from '../src/services/proof-of-work.js';
+import { repositoryRulesService } from '../src/services/repository-rules.js';
 import { runHistoryService } from '../src/services/run-history.js';
 import { createInboxItem, createProofRecord, createRankedIssue, createWorkspace } from './helpers/factories.js';
 
@@ -128,6 +130,7 @@ describe('stateful services', () => {
       published: false,
       reviewRequired: true,
       pullRequestUrl: undefined,
+      reviewReason: 'Repository requires prior discussion.',
     });
 
     expect(nextMemory.runStats.totalRuns).toBe(1);
@@ -136,6 +139,8 @@ describe('stateful services', () => {
     expect(nextMemory.pathSignals[0]?.changedCount).toBe(1);
     expect(nextMemory.validationSignals[0]?.command).toBe('bun test');
     expect(nextMemory.recentIssues[0]?.status).toBe('review_required');
+    expect(nextMemory.recentIssues[0]?.reviewReason).toBe('Repository requires prior discussion.');
+    expect(memoryService.renderMarkdown(nextMemory)).toContain('review Repository requires prior discussion.');
     expect(memoryService.renderMarkdown(nextMemory)).toContain('## Validation Failure Signals');
   });
 
@@ -218,12 +223,15 @@ describe('stateful services', () => {
   });
 
   test('proof-of-work service records PR links in markdown output', () => {
-    const records = proofOfWorkService.record(createProofRecord());
+    const records = proofOfWorkService.record(
+      createProofRecord({ reviewReason: 'Repository rules blocked PR opening.' }),
+    );
     const markdown = proofOfWorkService.renderMarkdown(records);
 
     expect(records).toHaveLength(1);
     expect(markdown).toContain('Published Runs: 1');
     expect(markdown).toContain('pr=https://github.com/acme/demo/pull/123');
+    expect(markdown).toContain('review=Repository rules blocked PR opening.');
   });
 
   test('proof-of-work service summarizes empty and unpublished activity correctly', () => {
@@ -278,5 +286,33 @@ describe('stateful services', () => {
   test('run history service returns undefined for unknown runs', () => {
     expect(runHistoryService.finish('missing-run', 'cancelled')).toBeUndefined();
     expect(runHistoryService.find('missing-run')).toBeUndefined();
+  });
+
+  test('repository rules service caches extracted rules and falls back safely when extraction fails', async () => {
+    const repoPath = mkdtempSync(join(tmpdir(), 'openmeta-rules-'));
+    writeFileSync(join(repoPath, 'CONTRIBUTING.md'), 'Discuss major changes before opening a PR.', 'utf-8');
+
+    const extractSpy = spyOn(llmService, 'extractRepositoryRules')
+      .mockResolvedValueOnce({
+        detectedFiles: ['CONTRIBUTING.md'],
+        summary: ['Discuss major changes before opening a PR.'],
+        requiredChecklistItems: [],
+        requiredValidationNotes: [],
+        requiresPriorDiscussion: true,
+        missingRequirements: [],
+        blockingRequirements: [],
+        requiredReleaseNotes: false,
+        requiredDiscussionEvidence: true,
+      } as never)
+      .mockRejectedValueOnce(new Error('should use cache'));
+
+    const first = await repositoryRulesService.loadFromWorkspace('acme/demo', repoPath);
+    const second = await repositoryRulesService.loadFromWorkspace('acme/demo', repoPath);
+
+    expect(first.requiresPriorDiscussion).toBe(true);
+    expect(second.requiresPriorDiscussion).toBe(true);
+    expect(extractSpy).toHaveBeenCalledTimes(1);
+
+    rmSync(repoPath, { recursive: true, force: true });
   });
 });

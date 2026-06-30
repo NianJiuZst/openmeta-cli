@@ -9,6 +9,7 @@ import {
   PatchDraftEnvelopeSchema,
   type PullRequestDraft,
   PullRequestDraftEnvelopeSchema,
+  RepositoryContributionRulesSchema,
   type RepositoryImprovementSuggestion,
   RepositorySuggestionListEnvelopeSchema,
   type StructuredOutputResult,
@@ -29,6 +30,7 @@ import {
   PR_DRAFT_PROMPT,
   REPOSITORY_ANALYSIS_PROMPT,
   REPOSITORY_ANALYSIS_REPAIR_PROMPT,
+  REPOSITORY_RULES_PROMPT,
   VALIDATION_REPAIR_PROMPT,
 } from '../infra/prompt-templates.js';
 import type {
@@ -41,6 +43,7 @@ import type {
   RankedIssue,
   RepoFileSnippet,
   RepoMemory,
+  RepositoryRuleFile,
   RepoWorkspaceContext,
   TestResult,
   UserProfile,
@@ -195,6 +198,7 @@ Repo Stars: ${i.repoStars}`,
       issueContext: this.formatRankedIssue(issue),
       repoContext: contextAssemblerService.buildRepositoryContext(workspace),
       repoMemory: contextAssemblerService.buildRepoMemoryContext(memory),
+      repositoryRules: this.formatRepositoryRules(workspace.repositoryRules),
     });
 
     return this.generateStructuredOutput({
@@ -275,6 +279,7 @@ Repo Stars: ${i.repoStars}`,
       issueContext: this.formatRankedIssue(issue),
       patchDraft: JSON.stringify(patchDraft, null, 2),
       validationContext: contextAssemblerService.buildValidationContext(workspace),
+      repositoryRules: this.formatRepositoryRules(workspace.repositoryRules),
     });
 
     return this.generateStructuredOutput({
@@ -304,7 +309,20 @@ Repo Stars: ${i.repoStars}`,
     });
   }
 
-  private async chat(prompt: string, options: { temperature?: number } = {}): Promise<string> {
+  async extractRepositoryRules(repoFullName: string, files: RepositoryRuleFile[]) {
+    const prompt = fillPrompt(REPOSITORY_RULES_PROMPT, {
+      repoFullName,
+      ruleFiles:
+        files.length > 0
+          ? files.map((file) => `FILE: ${file.path}\n${file.content}`).join('\n\n')
+          : 'No repository rule files were provided.',
+    });
+
+    const content = await this.chat(prompt, { temperature: 0.1, jsonObject: true });
+    return this.parseStructuredJson(content, RepositoryContributionRulesSchema);
+  }
+
+  private async chat(prompt: string, options: { temperature?: number; jsonObject?: boolean } = {}): Promise<string> {
     if (!this.client) {
       throw new Error('LLM client not initialized');
     }
@@ -317,6 +335,7 @@ Repo Stars: ${i.repoStars}`,
           { role: 'user', content: prompt },
         ],
         temperature: options.temperature ?? 0.7,
+        ...(options.jsonObject ? this.getJsonObjectRequestParams() : {}),
         ...this.getStreamingRequestParams(),
         ...this.getReasoningRequestParams(),
       });
@@ -461,6 +480,18 @@ Repo Stars: ${i.repoStars}`,
     }
 
     return { reasoning_effort: this.reasoningEffort };
+  }
+
+  private getJsonObjectRequestParams(): { response_format?: { type: 'json_object' } } {
+    if (this.provider === 'gemini' || this.provider === 'claude') {
+      return {};
+    }
+
+    return {
+      response_format: {
+        type: 'json_object',
+      },
+    };
   }
 
   private getStreamingRequestParams(): { stream?: true; stream_options?: { include_usage: true } } {
@@ -609,6 +640,29 @@ Repo Stars: ${i.repoStars}`,
       `Disks: ${environment.disks.map((disk) => `${disk.mountPoint} ${disk.freeGB}GB free/${disk.totalGB}GB total`).join(', ') || 'unknown'}`,
       `Available Tools: ${availableTools || 'none detected'}`,
       `Missing Tools: ${missingTools || 'none detected'}`,
+    ].join('\n');
+  }
+
+  private formatRepositoryRules(rules?: RepoWorkspaceContext['repositoryRules']): string {
+    if (!rules) {
+      return 'No repository contribution rules were detected.';
+    }
+
+    return [
+      `Detected Files: ${rules.detectedFiles.join(', ') || 'none'}`,
+      `Summary: ${rules.summary.join(' | ') || 'none'}`,
+      `PR Title Rule: ${rules.prTitleRule || 'none'}`,
+      `Commit Message Rule: ${rules.commitMessageRule || 'none'}`,
+      `Branch Naming Rule: ${rules.branchNamingRule || 'none'}`,
+      `Required Checklist: ${rules.requiredChecklistItems.join(' | ') || 'none'}`,
+      `Required Validation Notes: ${rules.requiredValidationNotes.join(' | ') || 'none'}`,
+      `Required Issue Linking: ${rules.requiredIssueLinking || 'none'}`,
+      `Allows Draft PR: ${rules.allowsDraftPr === undefined ? 'unknown' : rules.allowsDraftPr ? 'yes' : 'no'}`,
+      `Requires Prior Discussion: ${rules.requiresPriorDiscussion ? 'yes' : 'no'}`,
+      `Required Release Notes: ${rules.requiredReleaseNotes ? 'yes' : 'no'}`,
+      `Required Discussion Evidence: ${rules.requiredDiscussionEvidence ? 'yes' : 'no'}`,
+      `Missing Requirements: ${rules.missingRequirements.join(' | ') || 'none'}`,
+      `Blocking Requirements: ${rules.blockingRequirements.join(' | ') || 'none'}`,
     ].join('\n');
   }
 

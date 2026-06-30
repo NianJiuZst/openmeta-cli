@@ -75,7 +75,7 @@ export class ProofOfWorkService {
             .slice(0, 10)
             .map(
               (record) =>
-                `- ${record.repoFullName}#${record.issueNumber} | overall ${record.overallScore} | published=${record.published}${record.pullRequestUrl ? ` | pr=${record.pullRequestUrl}` : ''}`,
+                `- ${record.repoFullName}#${record.issueNumber} | overall ${record.overallScore} | published=${record.published}${record.pullRequestUrl ? ` | pr=${record.pullRequestUrl}` : ''}${record.reviewReason ? ` | review=${record.reviewReason}` : ''}`,
             )
         : ['- No activity recorded']),
       '',

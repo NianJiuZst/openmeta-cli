@@ -47,6 +47,7 @@ interface AgentMachineInternals {
     validationResults: unknown[];
     url?: string;
     number?: number;
+    reviewReason?: string;
   }>;
   prepareLocalArtifactPaths(issue: unknown): ReturnType<typeof createArtifacts>;
   writeLocalArtifacts(input: unknown): void;

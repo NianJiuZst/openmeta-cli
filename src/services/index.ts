@@ -14,6 +14,7 @@ export { MemoryService, memoryService } from './memory.js';
 export { OpportunityService, opportunityService } from './opportunity.js';
 export { PermissionPolicyService, permissionPolicyService } from './permission-policy.js';
 export { ProofOfWorkService, proofOfWorkService } from './proof-of-work.js';
+export { RepositoryRulesService, repositoryRulesService } from './repository-rules.js';
 export {
   RepositoryTargetingService,
   type ResolvedRepositoryScope,

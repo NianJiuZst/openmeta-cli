@@ -3,7 +3,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import type { PullRequestDraft } from '../contracts/index.js';
 import { logger } from '../infra/index.js';
-import type { RankedIssue } from '../types/index.js';
+import type { RankedIssue, RepositoryContributionRules } from '../types/index.js';
 import { contentService } from './content.js';
 import { githubService } from './github.js';
 
@@ -24,6 +24,7 @@ export interface ContributionPrSubmissionInput {
   prDraft: PullRequestDraft;
   workspacePath: string;
   changedFiles: string[];
+  repositoryRules?: RepositoryContributionRules;
 }
 
 export interface ContributionPrSubmissionResult {
@@ -42,9 +43,9 @@ export class ContributionPrService {
   async submitDraftPullRequest(input: ContributionPrSubmissionInput): Promise<ContributionPrSubmissionResult> {
     const upstreamRepo = await this.getUpstreamRepositoryContext(input.issue);
     const forkRepo = await this.ensureForkRepository(upstreamRepo);
-    const branchName = this.buildPublishBranchName(input.issue);
-    const draftPullRequest = this.buildDraftPullRequest(input.prDraft);
-    const commitMessage = this.buildContributionCommitMessage(input.issue);
+    const branchName = this.buildPublishBranchName(input.issue, input.repositoryRules);
+    const draftPullRequest = this.buildDraftPullRequest(input.prDraft, input.repositoryRules);
+    const commitMessage = this.buildContributionCommitMessage(input.issue, input.repositoryRules);
 
     await this.createCommitOnFork({
       forkRepo,
@@ -68,25 +69,32 @@ export class ContributionPrService {
     };
   }
 
-  buildDraftPullRequest(prDraft: PullRequestDraft): DraftPullRequest {
+  buildDraftPullRequest(prDraft: PullRequestDraft, repositoryRules?: RepositoryContributionRules): DraftPullRequest {
     return {
       title: prDraft.title,
-      body: contentService.formatPullRequestDraftBody(prDraft),
+      body: contentService.formatPullRequestDraftBody(prDraft, repositoryRules),
     };
   }
 
-  buildPublishBranchName(issue: RankedIssue): string {
+  buildPublishBranchName(issue: RankedIssue, rules?: RepositoryContributionRules): string {
     const slug = issue.title
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '')
       .slice(0, 32);
-
-    return `openmeta/agent-${issue.number}-${slug || 'issue'}-${Date.now()}`;
+    const branchRule = rules?.branchNamingRule;
+    const slashPrefix = branchRule?.match(/([a-z][a-z0-9_-]*)\//i)?.[0];
+    const keywordPrefix = branchRule?.match(/\b(feature|feat|fix|docs|chore|refactor|test|bugfix)\b/i)?.[0];
+    const explicitPrefix = slashPrefix || (keywordPrefix ? `${keywordPrefix.toLowerCase()}/` : undefined);
+    const prefix = explicitPrefix || 'openmeta/agent-';
+    return `${prefix}${issue.number}-${slug || 'issue'}-${Date.now()}`;
   }
 
-  buildContributionCommitMessage(issue: RankedIssue): string {
-    return `feat: address ${issue.repoFullName}#${issue.number} ${issue.title}`.slice(0, 120);
+  buildContributionCommitMessage(issue: RankedIssue, rules?: RepositoryContributionRules): string {
+    const conventionalHeader =
+      rules?.commitMessageRule?.match(/\b(feat|fix|docs|chore|refactor|test)(\([^)]+\))?:/i)?.[0] || 'feat:';
+    const header = conventionalHeader.endsWith(':') ? conventionalHeader.slice(0, -1) : conventionalHeader;
+    return `${header}: address ${issue.repoFullName}#${issue.number} ${issue.title}`.slice(0, 120);
   }
 
   private async getUpstreamRepositoryContext(issue: RankedIssue): Promise<ContributionRepositoryContext> {

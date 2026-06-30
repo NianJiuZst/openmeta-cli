@@ -8,10 +8,67 @@ import type {
   ProofOfWorkRecord,
   RankedIssue,
   RepoMemory,
+  RepositoryContributionRules,
   RepoWorkspaceContext,
+  TestResult,
 } from '../types/index.js';
 
 export class ContentService {
+  hasRequiredChecklistItems(body: string, items: string[] | undefined): boolean {
+    const normalizedBody = body.toLowerCase();
+    return (items || []).every((item) => normalizedBody.includes(item.toLowerCase()));
+  }
+
+  hasRequiredIssueLinking(body: string, issue: RankedIssue, requirement?: string): boolean {
+    if (!requirement) {
+      return true;
+    }
+
+    const normalizedBody = body.toLowerCase();
+    if (issue.number <= 0) {
+      return normalizedBody.includes(issue.htmlUrl.toLowerCase());
+    }
+
+    const requiredKeyword = this.resolveIssueLinkKeyword(requirement);
+    if (requiredKeyword) {
+      return (
+        normalizedBody.includes(`${requiredKeyword} #${issue.number}`.toLowerCase()) ||
+        normalizedBody.includes(`${requiredKeyword} ${issue.repoFullName}#${issue.number}`.toLowerCase())
+      );
+    }
+
+    return (
+      normalizedBody.includes(issue.htmlUrl.toLowerCase()) ||
+      normalizedBody.includes(`#${issue.number}`.toLowerCase()) ||
+      normalizedBody.includes(`${issue.repoFullName}#${issue.number}`.toLowerCase())
+    );
+  }
+
+  finalizePullRequestDraft(
+    draft: PullRequestDraft,
+    issue: RankedIssue,
+    rules?: RepositoryContributionRules,
+    validationResults: TestResult[] = [],
+  ): PullRequestDraft {
+    const validation = this.mergeRequiredValidationNotes(
+      draft.validation,
+      rules?.requiredValidationNotes,
+      validationResults,
+    );
+    let body = this.buildPullRequestDraftBody({ ...draft, validation }, rules);
+
+    body = this.ensureChecklistItems(body, rules?.requiredChecklistItems);
+    body = this.ensureIssueLinking(body, issue, rules?.requiredIssueLinking);
+    body = this.ensureValidationNotes(body, validation, rules?.requiredValidationNotes);
+    body = this.ensureReleaseNotes(body, draft, rules?.requiredReleaseNotes);
+
+    return {
+      ...draft,
+      validation,
+      body,
+    };
+  }
+
   generateResearchNote(issues: MatchedIssue[], reportContent: string): GeneratedContent {
     const title = `Daily Open Source Issue Research Notes - ${getLocalDateStamp()}`;
 
@@ -104,7 +161,19 @@ export class ContentService {
     return lines.join('\n');
   }
 
-  formatPullRequestDraftBody(draft: PullRequestDraft): string {
+  formatPullRequestDraftBody(draft: PullRequestDraft, rules?: RepositoryContributionRules): string {
+    return this.buildPullRequestDraftBody(draft, rules);
+  }
+
+  private buildPullRequestDraftBody(draft: PullRequestDraft, rules?: RepositoryContributionRules): string {
+    if (draft.body?.trim()) {
+      return draft.body.trim();
+    }
+
+    if (rules?.prTemplateBody?.trim()) {
+      return this.fillTemplateBody(rules.prTemplateBody, draft);
+    }
+
     const lines = [
       '## Summary',
       '',
@@ -127,8 +196,154 @@ export class ContentService {
     return lines.join('\n');
   }
 
-  formatPullRequestDraftMarkdown(draft: PullRequestDraft): string {
-    return [`Title: ${draft.title}`, '', this.formatPullRequestDraftBody(draft)].join('\n');
+  formatPullRequestDraftMarkdown(draft: PullRequestDraft, rules?: RepositoryContributionRules): string {
+    return [`Title: ${draft.title}`, '', this.formatPullRequestDraftBody(draft, rules)].join('\n');
+  }
+
+  private fillTemplateBody(template: string, draft: PullRequestDraft): string {
+    const sections = {
+      summary: draft.summary,
+      changes: draft.changes.map((change) => `- ${change}`).join('\n') || '- None',
+      validation: draft.validation.map((item) => `- ${item}`).join('\n') || '- Not run',
+      risks: draft.risks.map((item) => `- ${item}`).join('\n') || '- None',
+      issue: draft.summary,
+    };
+
+    let output = template.trim();
+    output = output.replace(/{{\s*summary\s*}}/gi, sections.summary);
+    output = output.replace(/{{\s*changes\s*}}/gi, sections.changes);
+    output = output.replace(/{{\s*validation\s*}}/gi, sections.validation);
+    output = output.replace(/{{\s*risks\s*}}/gi, sections.risks);
+    output = output.replace(/{{\s*issue\s*}}/gi, sections.issue);
+
+    const ensureSection = (heading: string, body: string) => {
+      if (new RegExp(`^##\\s+${heading}$`, 'im').test(output)) {
+        return;
+      }
+      output = `${output}\n\n## ${heading}\n\n${body}`.trim();
+    };
+
+    ensureSection('Summary', sections.summary);
+    ensureSection('Changes', sections.changes);
+    ensureSection('Validation', sections.validation);
+    ensureSection('Risks', sections.risks);
+
+    return output;
+  }
+
+  private mergeRequiredValidationNotes(
+    validation: string[],
+    requiredNotes: string[] | undefined,
+    validationResults: TestResult[],
+  ): string[] {
+    const merged = [...validation];
+
+    for (const note of requiredNotes || []) {
+      const normalizedNote = note.toLowerCase();
+      const alreadyPresent = merged.some((item) => item.toLowerCase().includes(normalizedNote));
+      if (alreadyPresent) {
+        continue;
+      }
+
+      const summary = this.describeValidationRequirement(validationResults);
+      merged.push(summary ? `${note}: ${summary}` : note);
+    }
+
+    return merged;
+  }
+
+  private describeValidationRequirement(validationResults: TestResult[]): string {
+    if (validationResults.length === 0) {
+      return 'not run in this automated pass';
+    }
+
+    return validationResults
+      .map((result) => `${result.command} ${result.passed ? 'passed' : `failed (${result.exitCode ?? 'n/a'})`}`)
+      .join('; ');
+  }
+
+  private ensureChecklistItems(body: string, items: string[] | undefined): string {
+    const missingItems = (items || []).filter((item) => !body.toLowerCase().includes(item.toLowerCase()));
+    if (missingItems.length === 0) {
+      return body;
+    }
+
+    return this.appendSection(body, 'Checklist', missingItems.map((item) => `- [ ] ${item}`).join('\n'));
+  }
+
+  private ensureIssueLinking(body: string, issue: RankedIssue, requirement?: string): string {
+    if (!requirement || this.hasRequiredIssueLinking(body, issue, requirement)) {
+      return body;
+    }
+
+    const issueReference = this.buildIssueLinkingSectionBody(issue, requirement);
+
+    return this.appendSection(body, 'Related Issue', issueReference);
+  }
+
+  private ensureValidationNotes(body: string, validation: string[], requiredNotes: string[] | undefined): string {
+    if ((requiredNotes || []).length === 0) {
+      return body;
+    }
+
+    const missingNotes = validation.filter((item) => !body.toLowerCase().includes(item.toLowerCase()));
+    if (missingNotes.length === 0) {
+      return body;
+    }
+
+    return this.appendSection(body, 'Validation Notes', missingNotes.map((item) => `- ${item}`).join('\n'));
+  }
+
+  private ensureReleaseNotes(body: string, draft: PullRequestDraft, requiredReleaseNotes?: boolean): string {
+    if (!requiredReleaseNotes || /release note|release-notes|changelog|breaking change/i.test(body)) {
+      return body;
+    }
+
+    const lines = [`- ${draft.summary}`];
+    if (draft.risks.length === 0) {
+      lines.push('- No breaking changes expected for this scoped fix.');
+    }
+
+    return this.appendSection(body, 'Release Notes', lines.join('\n'));
+  }
+
+  private appendSection(body: string, heading: string, sectionBody: string): string {
+    return `${body.trim()}\n\n## ${heading}\n\n${sectionBody}`.trim();
+  }
+
+  private buildIssueLinkingSectionBody(issue: RankedIssue, requirement?: string): string {
+    if (issue.number <= 0) {
+      return `- Related repository: ${issue.htmlUrl}`;
+    }
+
+    const requiredKeyword = this.resolveIssueLinkKeyword(requirement);
+    if (requiredKeyword) {
+      return `- ${this.capitalize(requiredKeyword)} ${issue.repoFullName}#${issue.number}\n- Link: ${issue.htmlUrl}`;
+    }
+
+    return `- Related issue: ${issue.repoFullName}#${issue.number}\n- Link: ${issue.htmlUrl}`;
+  }
+
+  private resolveIssueLinkKeyword(requirement?: string): string | null {
+    if (!requirement) {
+      return null;
+    }
+
+    const normalizedRequirement = requirement.toLowerCase();
+    if (/(close[sd]?|fix(?:e[sd])?|resolve[sd]?)/i.test(normalizedRequirement)) {
+      const match = normalizedRequirement.match(/(close[sd]?|fix(?:e[sd])?|resolve[sd]?)/i);
+      return match?.[1] || null;
+    }
+
+    if (/(ref(?:erence)?s?)/i.test(normalizedRequirement)) {
+      return 'refs';
+    }
+
+    return null;
+  }
+
+  private capitalize(value: string): string {
+    return value.charAt(0).toUpperCase() + value.slice(1);
   }
 
   formatRepositoryAnalysisMarkdown(
@@ -311,6 +526,27 @@ export class ContentService {
           )
         : ['- Not executed']),
       '',
+      '## Repository Contribution Rules',
+      '',
+      ...(workspace.repositoryRules
+        ? [
+            `- Detected Files: ${workspace.repositoryRules.detectedFiles.join(', ') || 'none'}`,
+            `- Summary: ${workspace.repositoryRules.summary.join(' | ') || 'none'}`,
+            `- PR Title Rule: ${workspace.repositoryRules.prTitleRule || 'none'}`,
+            `- Commit Message Rule: ${workspace.repositoryRules.commitMessageRule || 'none'}`,
+            `- Branch Naming Rule: ${workspace.repositoryRules.branchNamingRule || 'none'}`,
+            `- Required Checklist: ${workspace.repositoryRules.requiredChecklistItems.join(' | ') || 'none'}`,
+            `- Required Validation Notes: ${workspace.repositoryRules.requiredValidationNotes.join(' | ') || 'none'}`,
+            `- Required Issue Linking: ${workspace.repositoryRules.requiredIssueLinking || 'none'}`,
+            `- Allows Draft PR: ${workspace.repositoryRules.allowsDraftPr === undefined ? 'unknown' : workspace.repositoryRules.allowsDraftPr ? 'yes' : 'no'}`,
+            `- Requires Prior Discussion: ${workspace.repositoryRules.requiresPriorDiscussion ? 'yes' : 'no'}`,
+            `- Required Release Notes: ${workspace.repositoryRules.requiredReleaseNotes ? 'yes' : 'no'}`,
+            `- Required Discussion Evidence: ${workspace.repositoryRules.requiredDiscussionEvidence ? 'yes' : 'no'}`,
+            `- Missing Requirements: ${workspace.repositoryRules.missingRequirements.join(' | ') || 'none'}`,
+            `- Blocking Requirements: ${workspace.repositoryRules.blockingRequirements.join(' | ') || 'none'}`,
+          ]
+        : ['- None detected']),
+      '',
       '## Repo Memory',
       '',
       `- Generated Dossiers: ${memory.generatedDossiers}`,
@@ -323,7 +559,7 @@ export class ContentService {
       '',
       '## PR Draft',
       '',
-      this.formatPullRequestDraftMarkdown(prDraft),
+      this.formatPullRequestDraftMarkdown(prDraft, workspace.repositoryRules),
       '',
       `_Generated at ${new Date().toISOString()}_`,
       '',

@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, sep } from 'path';
 import { simpleGit } from 'simple-git';
 import { pathToFileURL } from 'url';
+import { llmService } from '../src/services/index.js';
 import { workspaceService } from '../src/services/workspace.js';
 import { createMemory, createRankedIssue, createWorkspace } from './helpers/factories.js';
 
@@ -232,10 +233,12 @@ describe('workspaceService.detectTestCommands', () => {
           candidateFiles: string[];
           snippets: Array<{ path: string; content: string }>;
           testCommands: Array<{ command: string }>;
+          repositoryRules?: { detectedFiles: string[] };
         }>;
       };
       const originalBuildRepoUrl = service.buildRepoUrl;
       service.buildRepoUrl = () => pathToFileURL(remotePath).href;
+      const extractSpy = spyOn(llmService, 'extractRepositoryRules').mockRejectedValue(new Error('llm unavailable'));
 
       try {
         const workspace = await service.prepareRepositoryWorkspace(
@@ -254,7 +257,9 @@ describe('workspaceService.detectTestCommands', () => {
         expect(workspace.candidateFiles.map(normalizePathForAssertion)).toContain('src/index.ts');
         expect(workspace.snippets.some((snippet) => snippet.path === 'README.md')).toBe(true);
         expect(workspace.testCommands.map((command) => command.command)).toContain('bun run test');
+        expect(workspace.repositoryRules?.detectedFiles).toEqual([]);
       } finally {
+        extractSpy.mockRestore();
         service.buildRepoUrl = originalBuildRepoUrl;
         delete process.env['OPENMETA_HOME'];
       }

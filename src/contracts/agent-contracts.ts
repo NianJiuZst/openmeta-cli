@@ -93,6 +93,25 @@ export const PullRequestDraftSchema = z.object({
   changes: z.array(nonEmptyTrimmedString).min(1).max(12),
   validation: z.array(nonEmptyTrimmedString).default([]),
   risks: z.array(nonEmptyTrimmedString).default([]),
+  body: trimmedString.optional(),
+});
+
+export const RepositoryContributionRulesSchema = z.object({
+  detectedFiles: z.array(nonEmptyTrimmedString).default([]).transform(dedupeStrings),
+  summary: z.array(nonEmptyTrimmedString).default([]),
+  prTemplateBody: trimmedString.optional(),
+  prTitleRule: trimmedString.optional(),
+  commitMessageRule: trimmedString.optional(),
+  branchNamingRule: trimmedString.optional(),
+  requiredChecklistItems: z.array(nonEmptyTrimmedString).default([]),
+  requiredValidationNotes: z.array(nonEmptyTrimmedString).default([]),
+  requiredIssueLinking: trimmedString.optional(),
+  allowsDraftPr: z.boolean().optional(),
+  requiresPriorDiscussion: z.boolean().default(false),
+  missingRequirements: z.array(nonEmptyTrimmedString).default([]),
+  blockingRequirements: z.array(nonEmptyTrimmedString).default([]),
+  requiredReleaseNotes: z.boolean().default(false),
+  requiredDiscussionEvidence: z.boolean().default(false),
 });
 
 export const RepositoryImprovementSuggestionSchema = z.object({
@@ -192,6 +211,7 @@ export type PatchDraft = z.infer<typeof PatchDraftSchema>;
 export type GeneratedFileChange = z.infer<typeof GeneratedFileChangeSchema>;
 export type ImplementationDraft = z.infer<typeof ImplementationDraftSchema>;
 export type PullRequestDraft = z.infer<typeof PullRequestDraftSchema>;
+export type RepositoryContributionRules = z.infer<typeof RepositoryContributionRulesSchema>;
 export type RepositoryImprovementSuggestion = z.infer<typeof RepositoryImprovementSuggestionSchema>;
 export type RepositorySuggestionList = z.infer<typeof RepositorySuggestionListSchema>;
 export type EnvironmentGap = z.infer<typeof EnvironmentGapSchema>;

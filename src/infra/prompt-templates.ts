@@ -129,6 +129,9 @@ Repo Context:
 
 Repo Memory:
 {{repoMemory}}
+
+Repository Rules:
+{{repositoryRules}}
 `;
 
 export const PATCH_DRAFT_REPAIR_PROMPT = `You are OpenMeta, an autonomous open source contribution agent.
@@ -412,6 +415,47 @@ Patch Draft:
 
 Validation Context:
 {{validationContext}}
+
+Repository Rules:
+{{repositoryRules}}
+`;
+
+export const REPOSITORY_RULES_PROMPT = `You are OpenMeta, an autonomous open source contribution agent.
+
+Read the repository contribution rule files and extract only repository-specific pull request and contribution constraints into strict JSON.
+
+Requirements:
+1. Return one valid JSON object only. No markdown. No commentary.
+2. Only use evidence from the provided files.
+3. If a rule is uncertain, leave the structured field empty and add a note to missingRequirements instead of inventing it.
+4. Only add items to blockingRequirements when the file text clearly states a hard prerequisite or requirement that would block opening a PR safely.
+5. summary must be a short flat list of the most relevant detected rules.
+6. Set requiredReleaseNotes to true when the repository clearly asks for release notes, changelog entries, or breaking change notes.
+7. Set requiredDiscussionEvidence to true when the repository clearly says contributors should discuss first or get maintainer approval before opening a PR.
+
+Output schema:
+{
+  "detectedFiles": ["relative/path"],
+  "summary": ["short rule summary"],
+  "prTemplateBody": "optional full PR template body when present",
+  "prTitleRule": "optional PR title convention",
+  "commitMessageRule": "optional commit message convention",
+  "branchNamingRule": "optional branch naming convention",
+  "requiredChecklistItems": ["required checklist item"],
+  "requiredValidationNotes": ["required validation or test note"],
+  "requiredIssueLinking": "optional issue linking requirement",
+  "allowsDraftPr": true,
+  "requiresPriorDiscussion": false,
+  "missingRequirements": ["what a human still needs to verify"],
+  "blockingRequirements": ["clear blocker for automatic PR opening"],
+  "requiredReleaseNotes": false,
+  "requiredDiscussionEvidence": false
+}
+
+Repository: {{repoFullName}}
+
+Rule Files:
+{{ruleFiles}}
 `;
 
 export const REPOSITORY_ANALYSIS_PROMPT = `You are OpenMeta, an autonomous open source contribution agent.
