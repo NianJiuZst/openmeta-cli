@@ -21,6 +21,7 @@ export {
 } from './repository-targeting.js';
 export { RunHistoryService, runHistoryService } from './run-history.js';
 export { type BinaryResolution, inspectBinaryOnPath } from './runtime-diagnostics.js';
+export { type SandboxAvailability, SandboxService, sandboxService } from './sandbox.js';
 export type { SchedulerSyncResult } from './scheduler.js';
 export { SchedulerService, schedulerService } from './scheduler.js';
 export {

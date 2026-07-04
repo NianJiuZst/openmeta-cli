@@ -1,6 +1,12 @@
 import { execFileSync } from 'node:child_process';
 
-const args = ['build', '--target=bun', '--outfile=bin/openmeta.js', './src/cli.ts'];
+const args = [
+  'build',
+  '--target=bun',
+  '--outfile=bin/openmeta.js',
+  '--external=@anthropic-ai/sandbox-runtime',
+  './src/cli.ts',
+];
 
 function run(command, commandArgs) {
   execFileSync(command, commandArgs, {

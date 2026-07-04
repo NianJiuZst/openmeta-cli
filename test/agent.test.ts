@@ -205,7 +205,7 @@ describe('AgentOrchestrator patch workflow', () => {
         },
       });
 
-      workspaceService.runValidationCommands = () => {
+      workspaceService.runValidationCommands = async () => {
         validationRuns += 1;
         return validationRuns === 1
           ? [{ command: 'pytest', exitCode: 1, passed: false, output: 'AssertionError: expected version 2' }]
@@ -544,7 +544,7 @@ describe('AgentOrchestrator patch workflow', () => {
         },
       });
 
-      workspaceService.runValidationCommands = () => {
+      workspaceService.runValidationCommands = async () => {
         validationRuns += 1;
         return [{ command: 'pytest', exitCode: 1, passed: false, output: 'AssertionError: expected version 2' }];
       };

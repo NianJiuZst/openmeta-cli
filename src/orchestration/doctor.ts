@@ -13,6 +13,7 @@ import {
   type BinaryResolution,
   inspectBinaryOnPath,
   repositoryTargetingService,
+  sandboxService,
   schedulerService,
 } from '../services/index.js';
 import type { AppConfig } from '../types/index.js';
@@ -115,6 +116,7 @@ export class DoctorOrchestrator {
         ['--version'],
         'Install Git and ensure it is available on PATH.',
       ),
+      this.checkSandboxRuntime(),
       this.checkGitHubConfig(resolvedConfig),
       this.checkLlmConfig(resolvedConfig),
       this.checkProfileConfig(resolvedConfig),
@@ -292,6 +294,29 @@ export class DoctorOrchestrator {
       ['--version'],
       'Install Bun 1.0+ and ensure it is available on PATH.',
     );
+  }
+
+  private checkSandboxRuntime(): DoctorCheck {
+    const availability = sandboxService.getAvailability();
+    if (!availability.available) {
+      return {
+        id: 'runtime-sandbox',
+        label: 'Validation sandbox',
+        status: 'warn',
+        summary: 'Repository validation commands will be skipped instead of running on the host.',
+        detail: availability.reason,
+        remediation:
+          'Use macOS, Linux, or WSL2 and install the sandbox runtime dependencies before using --run-checks.',
+      };
+    }
+
+    return {
+      id: 'runtime-sandbox',
+      label: 'Validation sandbox',
+      status: 'pass',
+      summary: 'OS-level isolation is available for repository validation commands.',
+      detail: availability.warnings.length > 0 ? availability.warnings.join('; ') : undefined,
+    };
   }
 
   private checkGitHubConfig(config: AppConfig): DoctorCheck {

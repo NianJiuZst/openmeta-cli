@@ -351,6 +351,12 @@ OpenMeta 会在本地维护自己的工作目录与状态：
 
 这使它非常适合个人长期使用：状态明确、路径稳定、可审计、可备份。
 
+### 沙箱执行
+
+OpenMeta 使用与 Claude Code 相同的 `@anthropic-ai/sandbox-runtime` 隔离仓库验证命令：macOS 使用 Seatbelt，Linux 和 WSL2 使用 bubblewrap。沙箱只允许写入当前 worktree 和临时目录，默认禁止网络访问，并隐藏 OpenMeta、GitHub、SSH 和云服务凭据路径及宿主进程中的敏感环境变量。
+
+验证执行采用 fail-closed 策略：沙箱不受支持、依赖缺失或初始化失败时，OpenMeta 会把验证报告为 unavailable，不会在宿主机上直接运行仓库代码。原生 Windows 当前不支持该运行时，请使用 WSL2 执行 `--run-checks`。
+
 ### 安全与边界
 
 OpenMeta 的卖点不是“替你托管一切”，而是**在你可控的本地环境里，把贡献流程自动化**。
@@ -735,6 +741,12 @@ OpenMeta keeps a clear local footprint:
 - repo memory and proof-of-work state: stored in the local OpenMeta state area
 
 This makes the tool practical for long-term individual use: stable paths, inspectable state, and easy backup.
+
+### Sandboxed Validation
+
+OpenMeta isolates repository validation commands with the same `@anthropic-ai/sandbox-runtime` used by Claude Code: Seatbelt on macOS and bubblewrap on Linux and WSL2. Commands may write only to the active worktree and a temporary directory, network access is denied by default, and OpenMeta, GitHub, SSH, cloud credential paths, and sensitive host environment variables are withheld.
+
+Validation fails closed. If the sandbox is unsupported, missing dependencies, or cannot initialize, validation is reported as unavailable instead of running repository code directly on the host. Native Windows is not supported by this runtime; use WSL2 for `--run-checks`.
 
 ### Security and Operating Model
 

@@ -39,6 +39,7 @@
     "@typescript/native-preview": "^7.0.0-dev.20260608.1"
   },
   "dependencies": {
+    "@anthropic-ai/sandbox-runtime": "^0.0.44",
     "@clack/prompts": "^1.2.0",
     "@octokit/rest": "^22.0.1",
     "boxen": "^8.0.1",

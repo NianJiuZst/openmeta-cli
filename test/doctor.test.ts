@@ -4,6 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { DoctorOrchestrator } from '../src/orchestration/doctor.js';
 import * as runtimeDiagnosticsModule from '../src/services/runtime-diagnostics.js';
+import { sandboxService } from '../src/services/sandbox.js';
 import { schedulerService } from '../src/services/scheduler.js';
 import type { AppConfig } from '../src/types/index.js';
 
@@ -142,6 +143,27 @@ describe('DoctorOrchestrator', () => {
     expect(report.ready).toBe(false);
     expect(report.checks.find((check) => check.id === 'github-config')?.status).toBe('fail');
     expect(report.checks.find((check) => check.id === 'llm-config')?.status).toBe('fail');
+  });
+
+  test('reports an unavailable sandbox as a non-blocking warning', async () => {
+    const originalGetAvailability = sandboxService.getAvailability;
+    sandboxService.getAvailability = () => ({
+      available: false,
+      reason: 'Native Windows is unsupported.',
+      warnings: [],
+    });
+
+    try {
+      const report = await new DoctorOrchestrator().inspect(createConfig());
+      expect(report.checks.find((check) => check.id === 'runtime-sandbox')).toEqual(
+        expect.objectContaining({
+          status: 'warn',
+          detail: 'Native Windows is unsupported.',
+        }),
+      );
+    } finally {
+      sandboxService.getAvailability = originalGetAvailability;
+    }
   });
 
   test('fails when a configured artifact repository path does not exist', async () => {

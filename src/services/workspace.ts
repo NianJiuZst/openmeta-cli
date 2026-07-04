@@ -15,6 +15,7 @@ import type {
   TestResult,
 } from '../types/index.js';
 import { permissionPolicyService } from './permission-policy.js';
+import { sandboxService } from './sandbox.js';
 
 const EXCLUDED_DIRS = new Set(['.git', 'node_modules', 'dist', 'build', '.next', 'coverage', 'target', 'vendor']);
 
@@ -81,7 +82,7 @@ export class WorkspaceService {
       this.discoverFiles(workspaceState.workspacePath),
     ).slice(0, 8);
 
-    return this.buildWorkspaceContext({
+    return await this.buildWorkspaceContext({
       workspacePath: workspaceState.workspacePath,
       workspaceDirty: workspaceState.workspaceDirty,
       defaultBranch: workspaceState.defaultBranch,
@@ -109,7 +110,7 @@ export class WorkspaceService {
       this.discoverFiles(workspaceState.workspacePath),
     ).slice(0, 12);
 
-    return this.buildWorkspaceContext({
+    return await this.buildWorkspaceContext({
       workspacePath: workspaceState.workspacePath,
       candidateFiles,
       workspaceDirty: workspaceState.workspaceDirty,
@@ -209,8 +210,8 @@ export class WorkspaceService {
     };
   }
 
-  runValidationCommands(workspacePath: string, commands: TestCommand[]): TestResult[] {
-    return this.runTestCommands(workspacePath, commands);
+  async runValidationCommands(workspacePath: string, commands: TestCommand[]): Promise<TestResult[]> {
+    return await sandboxService.runValidationCommands(workspacePath, commands);
   }
 
   readWorkspaceFiles(workspacePath: string, filePaths: string[]): RepoFileSnippet[] {
@@ -492,7 +493,7 @@ export class WorkspaceService {
     return 'main';
   }
 
-  private buildWorkspaceContext(input: {
+  private async buildWorkspaceContext(input: {
     workspacePath: string;
     workspaceDirty: boolean;
     defaultBranch: string;
@@ -500,7 +501,7 @@ export class WorkspaceService {
     candidateFiles: string[];
     runChecks: boolean;
     executionMode: ExecutionMode;
-  }): RepoWorkspaceContext {
+  }): Promise<RepoWorkspaceContext> {
     const topLevelFiles = readdirSync(input.workspacePath).slice(0, 50);
     const snippets = input.candidateFiles.map((path) => ({
       path,
@@ -512,7 +513,7 @@ export class WorkspaceService {
       input.executionMode,
     );
     const testResults = input.runChecks
-      ? this.runTestCommands(input.workspacePath, validationCommands.slice(0, 3))
+      ? await this.runTestCommands(input.workspacePath, validationCommands.slice(0, 3))
       : [];
 
     return {
@@ -913,47 +914,8 @@ export class WorkspaceService {
     return `${runner} run ${scriptName}`;
   }
 
-  private runTestCommands(workspacePath: string, commands: TestCommand[]): TestResult[] {
-    return commands.map((item) => {
-      const toolDefault = this.resolveToolDefaultCommand(item);
-      const result = toolDefault
-        ? spawnSync(toolDefault.command, toolDefault.args, {
-            cwd: workspacePath,
-            encoding: 'utf-8',
-            timeout: 120000,
-          })
-        : spawnSync(item.command, {
-            cwd: workspacePath,
-            encoding: 'utf-8',
-            shell: true,
-            timeout: 120000,
-          });
-
-      const output = `${result.stdout || ''}\n${result.stderr || ''}`.trim().slice(0, 2000);
-      return {
-        command: item.command,
-        exitCode: typeof result.status === 'number' ? result.status : null,
-        passed: result.status === 0,
-        output,
-      };
-    });
-  }
-
-  private resolveToolDefaultCommand(command: TestCommand): { command: string; args: string[] } | null {
-    if (command.source !== 'tool-default') {
-      return null;
-    }
-
-    switch (command.command) {
-      case 'cargo test':
-        return { command: 'cargo', args: ['test'] };
-      case 'go test ./...':
-        return { command: 'go', args: ['test', './...'] };
-      case 'pytest':
-        return { command: 'pytest', args: [] };
-      default:
-        return null;
-    }
+  private async runTestCommands(workspacePath: string, commands: TestCommand[]): Promise<TestResult[]> {
+    return await sandboxService.runValidationCommands(workspacePath, commands);
   }
 }
 
