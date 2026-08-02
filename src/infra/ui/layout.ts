@@ -1,6 +1,7 @@
 import type { UiCapabilities } from './types.js';
 
-const ANSI_PATTERN = /\u001B\[[0-9;]*m/g;
+// biome-ignore lint/complexity/useRegexLiterals: keeping ESC escaped avoids embedding a control character in source.
+const ANSI_PATTERN = new RegExp('\\u001B\\[[0-9;]*m', 'g');
 
 export function stripAnsi(input: string): string {
   return input.replace(ANSI_PATTERN, '');
