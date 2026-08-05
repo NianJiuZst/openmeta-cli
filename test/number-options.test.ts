@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { parseDashboardPort, parseRunLimit, parseStarCount } from '../src/commands/number-options.js';
+import { parseDashboardPort, parseListLimit, parseStarCount } from '../src/commands/number-options.js';
 
 describe('numeric command options', () => {
   test('parses non-negative repository star counts as decimal integers', () => {
@@ -16,9 +16,9 @@ describe('numeric command options', () => {
     expect(() => parseDashboardPort('65536')).toThrow('Expected a port between 0 and 65535.');
   });
 
-  test('requires run limits to be positive decimal integers', () => {
-    expect(parseRunLimit('25')).toBe(25);
-    expect(() => parseRunLimit('0')).toThrow('Expected a positive integer.');
-    expect(() => parseRunLimit('2runs')).toThrow('Expected a positive integer.');
+  test('requires list limits to be positive decimal integers', () => {
+    expect(parseListLimit('25')).toBe(25);
+    expect(() => parseListLimit('0')).toThrow('Expected a positive integer.');
+    expect(() => parseListLimit('2items')).toThrow('Expected a positive integer.');
   });
 });

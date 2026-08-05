@@ -10,7 +10,7 @@ import {
   machineRunsOrchestrator,
   machineScoutOrchestrator,
 } from '../orchestration/machine/index.js';
-import { parseStarCount } from './number-options.js';
+import { parseListLimit, parseStarCount } from './number-options.js';
 
 export function registerMachineCommand(program: Command): void {
   const machine = program.command('machine').description('Stable JSON-first automation surface');
@@ -72,8 +72,8 @@ export function registerMachineCommand(program: Command): void {
   machine
     .command('runs [id]')
     .description('Machine-safe run history access')
-    .option('--limit <count>', 'Number of runs to show', '10')
-    .action((id: string | undefined, options: { limit?: string }) => machineRunsOrchestrator.show(id, options));
+    .option('--limit <count>', 'Number of runs to show', parseListLimit, 10)
+    .action((id: string | undefined, options: { limit?: number }) => machineRunsOrchestrator.show(id, options));
 
   machine
     .command('inbox')
@@ -88,12 +88,12 @@ export function registerMachineCommand(program: Command): void {
   machine
     .command('scout')
     .description('Machine-safe opportunity discovery')
-    .option('--limit <count>', 'Number of opportunities to return', '10')
+    .option('--limit <count>', 'Number of opportunities to return', parseListLimit, 10)
     .option('--refresh', 'Ignore cached GitHub issue discovery results')
     .option('--min-stars <count>', 'Minimum repository star count', parseStarCount)
     .option('--max-stars <count>', 'Maximum repository star count', parseStarCount)
     .option('--repo <repository>', 'Limit issue discovery to one repository')
-    .action((options: { limit?: string; refresh?: boolean; minStars?: number; maxStars?: number; repo?: string }) =>
+    .action((options: { limit?: number; refresh?: boolean; minStars?: number; maxStars?: number; repo?: string }) =>
       machineScoutOrchestrator.execute(options),
     );
 

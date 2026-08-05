@@ -1,13 +1,13 @@
 import type { Command } from 'commander';
 import { agentOrchestrator } from '../orchestration/index.js';
-import { parseStarCount } from './number-options.js';
+import { parseListLimit, parseStarCount } from './number-options.js';
 import { runCommand } from './run-command.js';
 
 export function registerScoutCommand(program: Command): void {
   program
     .command('scout')
     .description('Rank the highest-value contribution opportunities')
-    .option('--limit <count>', 'Number of opportunities to show', '10')
+    .option('--limit <count>', 'Number of opportunities to show', parseListLimit, 10)
     .option('--refresh', 'Ignore cached GitHub issue discovery results')
     .option('--min-stars <count>', 'Minimum repository star count', parseStarCount)
     .option('--max-stars <count>', 'Maximum repository star count', parseStarCount)
@@ -16,7 +16,7 @@ export function registerScoutCommand(program: Command): void {
     .option('--all-repos', 'Ignore the active repository preset and search the broader issue stream')
     .action(
       (options: {
-        limit?: string;
+        limit?: number;
         refresh?: boolean;
         minStars?: number;
         maxStars?: number;
@@ -26,7 +26,7 @@ export function registerScoutCommand(program: Command): void {
       }) =>
         runCommand('OpenMeta Scout', () =>
           agentOrchestrator.scout({
-            limit: Number.parseInt(options.limit || '10', 10) || 10,
+            limit: options.limit ?? 10,
             refresh: options.refresh,
             minStars: options.minStars,
             maxStars: options.maxStars,

@@ -5,7 +5,7 @@ import { buildMachineEnvelope, writeMachinePayload, writeMachinePlan } from './r
 
 export class MachineScoutOrchestrator {
   async execute(
-    options: { limit?: string; refresh?: boolean; minStars?: number; maxStars?: number; repo?: string } = {},
+    options: { limit?: number; refresh?: boolean; minStars?: number; maxStars?: number; repo?: string } = {},
   ): Promise<void> {
     try {
       writeMachinePlan('machine scout', [
@@ -16,7 +16,7 @@ export class MachineScoutOrchestrator {
       ]);
       const result = await runInMachineContext(() =>
         agentOrchestrator.scoutMachine({
-          limit: Number.parseInt(options.limit || '10', 10) || 10,
+          limit: options.limit ?? 10,
           refresh: options.refresh,
           minStars: options.minStars,
           maxStars: options.maxStars,

@@ -35,7 +35,7 @@ export function parseDashboardPort(value: string): number {
   });
 }
 
-export function parseRunLimit(value: string): number {
+export function parseListLimit(value: string): number {
   return parseIntegerOption(value, {
     min: 1,
     message: 'Expected a positive integer.',
