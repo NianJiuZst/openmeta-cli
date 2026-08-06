@@ -1,6 +1,6 @@
-import { spawnSync } from 'child_process';
-import { existsSync, lstatSync, readlinkSync, realpathSync } from 'fs';
-import { dirname, isAbsolute, join, normalize, resolve } from 'path';
+import { spawnSync } from 'node:child_process';
+import { existsSync, lstatSync, readlinkSync, realpathSync } from 'node:fs';
+import { dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path';
 
 export interface BinaryResolution {
   onPath: boolean;
@@ -13,7 +13,18 @@ export interface BinaryResolution {
   error?: string;
 }
 
-function classifyBinarySource(
+function isPathWithin(candidate: string, root: string): boolean {
+  if (!candidate || !root) {
+    return false;
+  }
+
+  const relativePath = relative(root, candidate);
+  return (
+    relativePath === '' || (relativePath !== '..' && !relativePath.startsWith(`..${sep}`) && !isAbsolute(relativePath))
+  );
+}
+
+export function classifyBinarySource(
   invokedPath?: string,
   resolvedPath?: string,
   symlinkTarget?: string,
@@ -28,24 +39,24 @@ function classifyBinarySource(
   const workspaceRoot = normalize(resolve(process.cwd()));
   const homeDir = process.env['HOME'] ? normalize(resolve(process.env['HOME'])) : '';
 
-  if (homeDir && normalizedInvokedPath.startsWith(normalize(join(homeDir, '.bun', 'bin')))) {
+  if (homeDir && isPathWithin(normalizedInvokedPath, normalize(join(homeDir, '.bun', 'bin')))) {
     return 'bun-link';
   }
 
   if (
     homeDir &&
-    normalizedSymlinkTarget.startsWith(normalize(join(homeDir, '.bun', 'install', 'global', 'node_modules')))
+    isPathWithin(normalizedSymlinkTarget, normalize(join(homeDir, '.bun', 'install', 'global', 'node_modules')))
   ) {
     return 'bun-link';
   }
 
-  if (normalizedResolvedPath === workspaceRoot || normalizedResolvedPath.startsWith(`${workspaceRoot}/`)) {
+  if (isPathWithin(normalizedResolvedPath, workspaceRoot)) {
     return 'workspace';
   }
 
   if (
     homeDir &&
-    normalizedResolvedPath.startsWith(normalize(join(homeDir, '.bun', 'install', 'global', 'node_modules')))
+    isPathWithin(normalizedResolvedPath, normalize(join(homeDir, '.bun', 'install', 'global', 'node_modules')))
   ) {
     return 'bun-link';
   }
@@ -54,7 +65,10 @@ function classifyBinarySource(
     return 'npm-global';
   }
 
-  if (normalizedResolvedPath.startsWith('/usr/') || normalizedResolvedPath.startsWith('/opt/')) {
+  if (
+    isPathWithin(normalizedResolvedPath, normalize('/usr')) ||
+    isPathWithin(normalizedResolvedPath, normalize('/opt'))
+  ) {
     return 'system';
   }
 
