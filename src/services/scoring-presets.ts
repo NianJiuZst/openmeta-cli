@@ -1,13 +1,15 @@
 import type { OverallWeights, ScoringConfig, ScoringPreset, ScoringWeights } from '../types/index.js';
 
+const BALANCED_PRESET: ScoringPreset = {
+  name: 'balanced',
+  label: 'Balanced',
+  description: 'Default balanced scoring across all dimensions',
+  weights: { freshness: 0.25, onboardingClarity: 0.25, mergePotential: 0.3, impact: 0.2, riskPenalty: 0.35 },
+  overallWeights: { technicalMatch: 0.45, opportunityScore: 0.55 },
+};
+
 export const SCORING_PRESETS: ScoringPreset[] = [
-  {
-    name: 'balanced',
-    label: 'Balanced',
-    description: 'Default balanced scoring across all dimensions',
-    weights: { freshness: 0.25, onboardingClarity: 0.25, mergePotential: 0.3, impact: 0.2, riskPenalty: 0.35 },
-    overallWeights: { technicalMatch: 0.45, opportunityScore: 0.55 },
-  },
+  BALANCED_PRESET,
   {
     name: 'impact-first',
     label: 'Impact First',
@@ -39,36 +41,63 @@ export const SCORING_PRESETS: ScoringPreset[] = [
 ];
 
 export const DEFAULT_SCORING: ScoringConfig = {
-  weights: { ...SCORING_PRESETS[0]!.weights },
-  overallWeights: { ...SCORING_PRESETS[0]!.overallWeights },
+  weights: { ...BALANCED_PRESET.weights },
+  overallWeights: { ...BALANCED_PRESET.overallWeights },
   preset: 'balanced',
 };
+
+function normalizeDistribution(values: number[]): number[] {
+  const sum = values.reduce((total, value) => total + value, 0);
+  const normalized = values.map((value) => value / sum);
+  const rounded = normalized.map((value) => +value.toFixed(3));
+  const roundingDifference = +(1 - rounded.reduce((total, value) => total + value, 0)).toFixed(3);
+
+  let largestIndex = 0;
+  let largestValue = normalized[0] ?? 0;
+  for (const [index, value] of normalized.entries()) {
+    if (value > largestValue) {
+      largestIndex = index;
+      largestValue = value;
+    }
+  }
+
+  rounded[largestIndex] = +((rounded[largestIndex] ?? 0) + roundingDifference).toFixed(3);
+  return rounded;
+}
+
+function isValidDistribution(values: number[]): boolean {
+  return values.every((value) => Number.isFinite(value) && value >= 0) && values.some((value) => value > 0);
+}
 
 export function getPreset(name: string): ScoringPreset | undefined {
   return SCORING_PRESETS.find((p) => p.name === name);
 }
 
 export function normalizeWeights(weights: ScoringWeights): ScoringWeights {
-  const sum = weights.freshness + weights.onboardingClarity + weights.mergePotential + weights.impact;
-  if (sum === 0) {
+  const values = [weights.freshness, weights.onboardingClarity, weights.mergePotential, weights.impact];
+  if (!isValidDistribution(values)) {
     return { ...DEFAULT_SCORING.weights };
   }
+
+  const [freshness = 0, onboardingClarity = 0, mergePotential = 0, impact = 0] = normalizeDistribution(values);
   return {
-    freshness: +(weights.freshness / sum).toFixed(3),
-    onboardingClarity: +(weights.onboardingClarity / sum).toFixed(3),
-    mergePotential: +(weights.mergePotential / sum).toFixed(3),
-    impact: +(weights.impact / sum).toFixed(3),
+    freshness,
+    onboardingClarity,
+    mergePotential,
+    impact,
     riskPenalty: weights.riskPenalty,
   };
 }
 
 export function normalizeOverallWeights(weights: OverallWeights): OverallWeights {
-  const sum = weights.technicalMatch + weights.opportunityScore;
-  if (sum === 0) {
+  const values = [weights.technicalMatch, weights.opportunityScore];
+  if (!isValidDistribution(values)) {
     return { ...DEFAULT_SCORING.overallWeights };
   }
+
+  const [technicalMatch = 0, opportunityScore = 0] = normalizeDistribution(values);
   return {
-    technicalMatch: +(weights.technicalMatch / sum).toFixed(3),
-    opportunityScore: +(weights.opportunityScore / sum).toFixed(3),
+    technicalMatch,
+    opportunityScore,
   };
 }
