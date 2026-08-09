@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import type { AppConfig } from '../types/index.js';
+import { writeFileAtomically } from './atomic-file.js';
 import { CryptoService } from './crypto.js';
 import { DEFAULT_LLM_REASONING_EFFORT, parseLLMReasoningEffort } from './llm-reasoning.js';
 import { logger } from './logger.js';
@@ -132,7 +133,7 @@ export class ConfigService {
     }
 
     const encryptedConfig = this.encryptConfig(config);
-    writeFileSync(configFilePath, JSON.stringify(encryptedConfig, null, 2), 'utf-8');
+    writeFileAtomically(configFilePath, JSON.stringify(encryptedConfig, null, 2));
     this.config = {
       ...config,
       automation: {
@@ -171,7 +172,7 @@ export class ConfigService {
     if (existsSync(configFilePath)) {
       const backupPath = `${configFilePath}.backup`;
       const currentContent = readFileSync(configFilePath, 'utf-8');
-      writeFileSync(backupPath, currentContent, 'utf-8');
+      writeFileAtomically(backupPath, currentContent);
       logger.info(`Backup created at ${backupPath}`);
     }
     await this.save(createDefaultConfig());
