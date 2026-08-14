@@ -103,6 +103,20 @@ describe('ConfigOrchestrator', () => {
     await expect(orchestrator.set('llm.stream', 'maybe')).rejects.toThrow('llm.stream must be a boolean value.');
   });
 
+  test('rejects unsupported proficiency and partially numeric configuration values', async () => {
+    const orchestrator = new ConfigOrchestrator();
+
+    await expect(orchestrator.set('userProfile.proficiency', 'expert')).rejects.toThrow(
+      'userProfile.proficiency must be "beginner", "intermediate", or "advanced".',
+    );
+    await expect(orchestrator.set('automation.minMatchScore', '75points')).rejects.toThrow(
+      'automation.minMatchScore must be an integer between 0 and 100.',
+    );
+    await expect(orchestrator.set('scoring.weights.impact', '0.5weight')).rejects.toThrow(
+      'scoring.weights.impact must be a number between 0 and 1.',
+    );
+  });
+
   test('returns a masked machine config snapshot', async () => {
     const orchestrator = new ConfigOrchestrator();
 

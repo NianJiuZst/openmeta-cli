@@ -650,6 +650,26 @@ export class ConfigOrchestrator {
     return trimmed;
   }
 
+  private parseNumberInRange(
+    value: string,
+    options: { key: string; min: number; max: number; integer?: boolean },
+  ): number {
+    const normalized = value.trim();
+    const parsed = normalized ? Number(normalized) : Number.NaN;
+    const expectedType = options.integer ? 'an integer' : 'a number';
+
+    if (
+      !Number.isFinite(parsed) ||
+      (options.integer && !Number.isInteger(parsed)) ||
+      parsed < options.min ||
+      parsed > options.max
+    ) {
+      throw new Error(`${options.key} must be ${expectedType} between ${options.min} and ${options.max}.`);
+    }
+
+    return parsed;
+  }
+
   private async applyConfigValue(key: string, value: string): Promise<AppConfig> {
     const config = await configService.get();
     const validPaths = [
@@ -710,8 +730,15 @@ export class ConfigOrchestrator {
     }
 
     if (key === 'userProfile.proficiency') {
+      const proficiency = value.trim();
+      if (!['beginner', 'intermediate', 'advanced'].includes(proficiency)) {
+        throw new Error('userProfile.proficiency must be "beginner", "intermediate", or "advanced".');
+      }
       return configService.update({
-        userProfile: { ...config.userProfile, proficiency: value as 'beginner' | 'intermediate' | 'advanced' },
+        userProfile: {
+          ...config.userProfile,
+          proficiency: proficiency as AppConfig['userProfile']['proficiency'],
+        },
       });
     }
 
@@ -790,10 +817,7 @@ export class ConfigOrchestrator {
     }
 
     if (key === 'automation.minMatchScore') {
-      const minMatchScore = Number.parseInt(value, 10);
-      if (Number.isNaN(minMatchScore) || minMatchScore < 0 || minMatchScore > 100) {
-        throw new Error('automation.minMatchScore must be an integer between 0 and 100.');
-      }
+      const minMatchScore = this.parseNumberInRange(value, { key, min: 0, max: 100, integer: true });
       return configService.update({
         automation: {
           ...config.automation,
@@ -813,10 +837,7 @@ export class ConfigOrchestrator {
 
     if (key.startsWith('scoring.weights.')) {
       const weightKey = key.replace('scoring.weights.', '') as keyof ScoringWeights;
-      const numValue = Number.parseFloat(value);
-      if (Number.isNaN(numValue) || numValue < 0 || numValue > 1) {
-        throw new Error(`${key} must be a number between 0 and 1.`);
-      }
+      const numValue = this.parseNumberInRange(value, { key, min: 0, max: 1 });
       const newWeights = normalizeWeights({ ...config.scoring.weights, [weightKey]: numValue });
       return configService.update({
         scoring: { ...config.scoring, weights: newWeights, preset: 'custom' },
@@ -825,10 +846,7 @@ export class ConfigOrchestrator {
 
     if (key.startsWith('scoring.overallWeights.')) {
       const weightKey = key.replace('scoring.overallWeights.', '') as keyof OverallWeights;
-      const numValue = Number.parseFloat(value);
-      if (Number.isNaN(numValue) || numValue < 0 || numValue > 1) {
-        throw new Error(`${key} must be a number between 0 and 1.`);
-      }
+      const numValue = this.parseNumberInRange(value, { key, min: 0, max: 1 });
       const newWeights = normalizeOverallWeights({ ...config.scoring.overallWeights, [weightKey]: numValue });
       return configService.update({
         scoring: { ...config.scoring, overallWeights: newWeights, preset: 'custom' },
