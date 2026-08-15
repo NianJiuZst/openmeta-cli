@@ -62,6 +62,13 @@ describe('resolveGitHubIssueTarget', () => {
     );
   });
 
+  test('matches GitHub repository names without case sensitivity', () => {
+    expect(resolveGitHubIssueTarget('https://github.com/Wei-Shaw/sub2api/issues/3014', 'wei-shaw/Sub2API')).toEqual({
+      repoFullName: 'Wei-Shaw/sub2api',
+      issueNumber: 3014,
+    });
+  });
+
   test('requires --repo for numeric issue references', () => {
     expect(() => resolveGitHubIssueTarget('3014')).toThrow('Issue number targets require --repo');
   });

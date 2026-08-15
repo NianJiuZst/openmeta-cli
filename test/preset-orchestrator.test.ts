@@ -35,7 +35,7 @@ describe('PresetOrchestrator', () => {
     const orchestrator = new PresetOrchestrator();
 
     await orchestrator.add('frontend-core', {
-      repo: ['vercel/next.js', 'https://github.com/vercel/next.js', 'git@github.com:facebook/react.git'],
+      repo: ['vercel/next.js', 'https://github.com/Vercel/NEXT.JS', 'git@github.com:facebook/react.git'],
       activate: true,
     });
     await orchestrator.add('tooling', {

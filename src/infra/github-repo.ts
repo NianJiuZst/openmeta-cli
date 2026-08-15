@@ -78,7 +78,11 @@ export function resolveGitHubIssueTarget(issue: string, repo?: string): GitHubIs
   const issueReference = parseGitHubIssueReference(issue);
   const repoFullName = repo ? parseGitHubRepoFullName(repo) : undefined;
 
-  if (issueReference.repoFullName && repoFullName && issueReference.repoFullName !== repoFullName) {
+  if (
+    issueReference.repoFullName &&
+    repoFullName &&
+    issueReference.repoFullName.toLowerCase() !== repoFullName.toLowerCase()
+  ) {
     throw new Error(`Issue URL repository ${issueReference.repoFullName} does not match --repo ${repoFullName}.`);
   }
 

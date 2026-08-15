@@ -21,7 +21,18 @@ export class RepositoryTargetingService {
   }
 
   normalizeRepos(repoInputs: string[]): string[] {
-    const repos = [...new Set(repoInputs.map((value) => parseGitHubRepoFullName(value)))];
+    const repos: string[] = [];
+    const seen = new Set<string>();
+
+    for (const value of repoInputs) {
+      const repo = parseGitHubRepoFullName(value);
+      const identity = repo.toLowerCase();
+      if (!seen.has(identity)) {
+        seen.add(identity);
+        repos.push(repo);
+      }
+    }
+
     if (repos.length < 1 || repos.length > 10) {
       throw new Error('A repository preset must contain between 1 and 10 repositories.');
     }
