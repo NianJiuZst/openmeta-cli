@@ -10,7 +10,7 @@ import {
   machineRunsOrchestrator,
   machineScoutOrchestrator,
 } from '../orchestration/machine/index.js';
-import { parseStarCount } from './star-range.js';
+import { parseStarCount } from './number-options.js';
 
 export function registerMachineCommand(program: Command): void {
   const machine = program.command('machine').description('Stable JSON-first automation surface');

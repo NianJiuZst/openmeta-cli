@@ -1,7 +1,7 @@
 import { type Command, Option } from 'commander';
 import { dailyOrchestrator } from '../orchestration/index.js';
+import { parseStarCount } from './number-options.js';
 import { runCommand } from './run-command.js';
-import { parseStarCount } from './star-range.js';
 
 export function registerDailyCommand(program: Command): void {
   program

@@ -1,7 +1,7 @@
 import type { Command } from 'commander';
 import { agentOrchestrator } from '../orchestration/index.js';
+import { parseStarCount } from './number-options.js';
 import { runCommand } from './run-command.js';
-import { parseStarCount } from './star-range.js';
 
 export function registerScoutCommand(program: Command): void {
   program

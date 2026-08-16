@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import { Command } from 'commander';
 import { registerAgentCommand } from '../src/commands/agent.js';
 import { registerAnalyzeCommand } from '../src/commands/analyze.js';
+import { parseStarCount } from '../src/commands/number-options.js';
 import { registerScoutCommand } from '../src/commands/scout.js';
-import { parseStarCount } from '../src/commands/star-range.js';
 
 describe('repository targeting command options', () => {
   test('registers scout targeting options for presets and all-repos fallback', () => {
