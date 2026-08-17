@@ -9,6 +9,27 @@ function createEventId(timestamp: string): string {
   return `evt_${stamp}_${suffix}`;
 }
 
+function parseEventLogEntries(content: string): AgentEventLogEntry[] {
+  const lines = content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const entries: AgentEventLogEntry[] = [];
+
+  for (const [index, line] of lines.entries()) {
+    try {
+      entries.push(JSON.parse(line) as AgentEventLogEntry);
+    } catch (error) {
+      if (index === lines.length - 1) {
+        break;
+      }
+      throw error;
+    }
+  }
+
+  return entries;
+}
+
 export class AgentEventLogService {
   private getRootPath(): string {
     return ensureDirectory(join(getOpenMetaStateDir(), 'run-events'));
@@ -40,11 +61,7 @@ export class AgentEventLogService {
       return [];
     }
 
-    return readFileSync(path, 'utf-8')
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => JSON.parse(line) as AgentEventLogEntry);
+    return parseEventLogEntries(readFileSync(path, 'utf-8'));
   }
 }
 

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { ConfigService } from '../src/infra/config.js';
@@ -273,6 +273,26 @@ describe('stateful services', () => {
     expect(events[0]?.id).toBe(started.id);
     expect(events[1]?.id).toBe(finished.id);
     expect(events[0]?.data['commandName']).toBe('OpenMeta Agent');
+  });
+
+  test('agent event log preserves complete events when the final append is truncated', () => {
+    const started = agentEventLogService.record('run_interrupted', 'run_started', {
+      commandName: 'OpenMeta Agent',
+    });
+    appendFileSync(agentEventLogService.getPath('run_interrupted'), '{"version":1', 'utf-8');
+
+    const events = agentEventLogService.load('run_interrupted');
+
+    expect(events).toHaveLength(1);
+    expect(events[0]?.id).toBe(started.id);
+  });
+
+  test('agent event log still reports corruption before the final record', () => {
+    agentEventLogService.record('run_corrupt', 'run_started');
+    appendFileSync(agentEventLogService.getPath('run_corrupt'), 'not-json\n', 'utf-8');
+    agentEventLogService.record('run_corrupt', 'run_finished');
+
+    expect(() => agentEventLogService.load('run_corrupt')).toThrow();
   });
 
   test('run history service returns undefined for unknown runs', () => {
