@@ -41,7 +41,7 @@ interface GitHubServiceInternals {
   ): string;
   paginateSearchWithRetry(searchQuery: string): Promise<Array<{ id: number; number: number }>>;
   delay(ms: number): Promise<void>;
-  loadCachedIssues(repoFullName?: string): GitHubIssue[] | null;
+  loadCachedIssues(repoFullName?: string, allowExpired?: boolean): GitHubIssue[] | null;
   saveCachedIssues(issues: GitHubIssue[], repoFullName?: string): void;
   getCachePath(repoFullName?: string): string;
 }
@@ -377,8 +377,46 @@ describe('GitHubService internals', () => {
     );
     expect(service.loadCachedIssues()).toBeNull();
 
+    writeFileSync(cachePath, JSON.stringify({ fetchedAt: 'not-a-date', issues: [createIssue()] }), 'utf-8');
+    expect(service.loadCachedIssues()).toBeNull();
+
     writeFileSync(cachePath, JSON.stringify({ fetchedAt: new Date().toISOString(), issues: 'invalid' }), 'utf-8');
     expect(service.loadCachedIssues()).toBeNull();
+  });
+
+  test('falls back to an expired repository cache when live discovery fails', async () => {
+    const service = new GitHubService();
+    const internals = service as unknown as GitHubServiceInternals;
+    const cachePath = internals.getCachePath('acme/demo');
+    const statuses: string[] = [];
+
+    writeFileSync(
+      cachePath,
+      JSON.stringify({
+        fetchedAt: '2000-01-01T00:00:00.000Z',
+        issues: [createIssue({ repoFullName: 'acme/demo', repoStars: 120 })],
+      }),
+      'utf-8',
+    );
+    internals.octokit = {
+      rest: {
+        search: {
+          issuesAndPullRequests: async () => {
+            throw new Error('network unavailable');
+          },
+        },
+      },
+    } as unknown as GitHubServiceInternals['octokit'];
+
+    const issues = await service.fetchTrendingIssues({
+      repoFullName: 'acme/demo',
+      refresh: true,
+      onStatus: (message) => statuses.push(message),
+    });
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.repoFullName).toBe('acme/demo');
+    expect(statuses.at(-1)).toContain('last saved issue set');
   });
 
   test('can bypass the issue discovery cache when refresh is requested', async () => {

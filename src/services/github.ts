@@ -1,7 +1,8 @@
 import type { RestEndpointMethodTypes } from '@octokit/plugin-rest-endpoint-methods';
 import { Octokit } from '@octokit/rest';
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
+import { writeFileAtomically } from '../infra/atomic-file.js';
 import { ensureDirectory, getOpenMetaStateDir, parseGitHubRepoFullName } from '../infra/index.js';
 import { logger } from '../infra/logger.js';
 import type { GitHubIssue } from '../types/index.js';
@@ -231,6 +232,16 @@ export class GitHubService {
       }
 
       if (candidateItems.length === 0 && failures.length > 0) {
+        const cachedIssues = this.loadCachedIssues(repoFullName, true);
+        if (cachedIssues) {
+          const filteredIssues = this.filterIssuesByStarRange(cachedIssues, starRange);
+          logger.warn(
+            `GitHub issue discovery failed; using the last saved issue cache (${filteredIssues.length}/${cachedIssues.length} in the requested star range).`,
+          );
+          options.onStatus?.('Live GitHub search is unavailable, so OpenMeta is using the last saved issue set.');
+          return filteredIssues;
+        }
+
         throw new Error(this.buildDiscoveryFailureMessage(failures));
       }
 
@@ -757,7 +768,7 @@ export class GitHubService {
     return join(ensureDirectory(join(getOpenMetaStateDir(), 'cache')), cacheFile);
   }
 
-  private loadCachedIssues(repoFullName?: string): GitHubIssue[] | null {
+  private loadCachedIssues(repoFullName?: string, allowExpired = false): GitHubIssue[] | null {
     const cachePath = this.getCachePath(repoFullName);
     if (!existsSync(cachePath)) {
       return null;
@@ -769,8 +780,13 @@ export class GitHubService {
         return null;
       }
 
-      const ageMs = Date.now() - new Date(payload.fetchedAt).getTime();
-      if (ageMs > SEARCH_CACHE_TTL_MS) {
+      const fetchedAtMs = Date.parse(payload.fetchedAt);
+      if (!Number.isFinite(fetchedAtMs)) {
+        return null;
+      }
+
+      const ageMs = Date.now() - fetchedAtMs;
+      if (!allowExpired && ageMs > SEARCH_CACHE_TTL_MS) {
         return null;
       }
 
@@ -788,7 +804,7 @@ export class GitHubService {
         issues,
       };
 
-      writeFileSync(this.getCachePath(repoFullName), JSON.stringify(payload, null, 2), 'utf-8');
+      writeFileAtomically(this.getCachePath(repoFullName), JSON.stringify(payload, null, 2));
     } catch (error) {
       logger.debug('Unable to save GitHub issue cache', error);
     }
