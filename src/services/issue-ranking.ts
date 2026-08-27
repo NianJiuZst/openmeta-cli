@@ -10,6 +10,8 @@ import { proofOfWorkService } from './proof-of-work.js';
 const ISSUE_SCORING_BATCH_SIZE = 20;
 const MAX_ISSUES_FOR_LLM_SCORING = 80;
 const MAX_ISSUES_FOR_FEASIBILITY_HINTS = 30;
+const MAX_ISSUES_FOR_CLAIM_CHECKS = 15;
+const CLAIM_CHECK_BATCH_SIZE = 5;
 
 const PROFILE_TERM_ALIASES: Record<string, string[]> = {
   typescript: ['ts', 'tsx'],
@@ -95,7 +97,8 @@ export class IssueRankingService {
       maxStars: options.maxStars,
     });
     const rankedCandidates = this.rankIssuesForProfile(issues, config.userProfile);
-    const matched = await this.scoreIssuesInBatches(config.userProfile, rankedCandidates);
+    const claimAwareCandidates = await this.enrichIssueClaimContexts(rankedCandidates);
+    const matched = await this.scoreIssuesInBatches(config.userProfile, claimAwareCandidates);
     return this.applyScoutFeasibilityHints(opportunityService.rankIssues(matched, config.scoring));
   }
 
@@ -104,10 +107,12 @@ export class IssueRankingService {
     target: { repoFullName: string; issueNumber: number },
   ): Promise<RankedIssue[]> {
     const issue = await githubService.fetchIssue(target.repoFullName, target.issueNumber);
-    const [matched] = await this.scoreIssuesInBatches(config.userProfile, [issue]);
+    const [claimAwareIssue] = await this.enrichIssueClaimContexts([issue]);
+    const targetIssue = claimAwareIssue ?? issue;
+    const [matched] = await this.scoreIssuesInBatches(config.userProfile, [targetIssue]);
     if (!matched) {
       return this.applyScoutFeasibilityHints(
-        opportunityService.rankIssues(this.buildLocalIssueMatches([issue], config.userProfile), config.scoring),
+        opportunityService.rankIssues(this.buildLocalIssueMatches([targetIssue], config.userProfile), config.scoring),
       );
     }
 
@@ -149,6 +154,29 @@ export class IssueRankingService {
     }
 
     return matches;
+  }
+
+  private async enrichIssueClaimContexts(issues: GitHubIssue[]): Promise<GitHubIssue[]> {
+    const candidates = issues.slice(0, MAX_ISSUES_FOR_CLAIM_CHECKS);
+    const enriched: GitHubIssue[] = [];
+
+    for (let start = 0; start < candidates.length; start += CLAIM_CHECK_BATCH_SIZE) {
+      const batch = candidates.slice(start, start + CLAIM_CHECK_BATCH_SIZE);
+      const results = await Promise.all(
+        batch.map(async (issue) => {
+          try {
+            const context = await githubService.fetchIssueClaimContext(issue.repoFullName, issue.number);
+            return { ...issue, ...context };
+          } catch (error) {
+            logger.debug(`Unable to enrich claim context for ${issue.repoFullName}#${issue.number}`, error);
+            return issue;
+          }
+        }),
+      );
+      enriched.push(...results);
+    }
+
+    return [...enriched, ...issues.slice(MAX_ISSUES_FOR_CLAIM_CHECKS)];
   }
 
   rankIssuesForProfile(issues: GitHubIssue[], userProfile: AppConfig['userProfile']): GitHubIssue[] {

@@ -171,6 +171,7 @@ describe('IssueRankingService', () => {
 
   test('builds a ranked target issue without batch discovery', async () => {
     const originalFetchIssue = githubService.fetchIssue;
+    const originalFetchIssueClaimContext = githubService.fetchIssueClaimContext;
     const originalFetchRepositoryProbe = githubService.fetchRepositoryProbe;
     const originalScoreIssues = llmService.scoreIssues;
     const rankingServiceState = issueRankingService as unknown as {
@@ -180,6 +181,7 @@ describe('IssueRankingService', () => {
     const originalCachedEnvironment = rankingServiceState.cachedEnvironment;
     const originalDetectionPromise = rankingServiceState.detectionPromise;
     const observedFetches: unknown[] = [];
+    const observedClaimChecks: unknown[] = [];
 
     try {
       rankingServiceState.cachedEnvironment = testEnvironment;
@@ -194,6 +196,25 @@ describe('IssueRankingService', () => {
           body: 'The issue points to src/openai.ts and includes steps to reproduce.',
           labels: [],
         });
+      };
+      githubService.fetchIssueClaimContext = async (repoFullName, issueNumber) => {
+        observedClaimChecks.push({ repoFullName, issueNumber });
+        return {
+          recentComments: [
+            {
+              author: 'alice',
+              authorAssociation: 'CONTRIBUTOR',
+              body: "I'd like to work on this.",
+              createdAt: new Date().toISOString(),
+              htmlUrl: 'https://github.com/Wei-Shaw/sub2api/issues/3014#issuecomment-1',
+            },
+          ],
+          claimAssessment: {
+            status: 'likely',
+            evidence: ["alice: I'd like to work on this."],
+            checkedAt: new Date().toISOString(),
+          },
+        };
       };
       githubService.fetchRepositoryProbe = async (repoFullName) => ({
         repoFullName,
@@ -279,14 +300,22 @@ describe('IssueRankingService', () => {
           issueNumber: 3014,
         },
       ]);
+      expect(observedClaimChecks).toEqual([
+        {
+          repoFullName: 'Wei-Shaw/sub2api',
+          issueNumber: 3014,
+        },
+      ]);
       expect(ranked?.repoFullName).toBe('Wei-Shaw/sub2api');
       expect(ranked?.number).toBe(3014);
       expect(ranked?.matchScore).toBe(77);
+      expect(ranked?.claimAssessment?.status).toBe('likely');
       expect(ranked?.opportunity.overallScore).toBeGreaterThan(0);
     } finally {
       rankingServiceState.cachedEnvironment = originalCachedEnvironment;
       rankingServiceState.detectionPromise = originalDetectionPromise;
       githubService.fetchIssue = originalFetchIssue;
+      githubService.fetchIssueClaimContext = originalFetchIssueClaimContext;
       githubService.fetchRepositoryProbe = originalFetchRepositoryProbe;
       llmService.scoreIssues = originalScoreIssues;
     }

@@ -20,6 +20,12 @@ const LARGE_SCOPE_PATTERNS = [
   /\barchitecture\b/i,
   /\bbreaking change\b/i,
 ];
+const CLAIM_RISK_PENALTIES = {
+  none: 0,
+  possible: 12,
+  likely: 25,
+  claimed: 40,
+} as const;
 
 function clampScore(value: number): number {
   return Math.max(0, Math.min(100, Math.round(value)));
@@ -86,7 +92,7 @@ function computeImpactScore(issue: MatchedIssue): number {
   return clampScore(20 + Math.log10(issue.repoStars + 10) * 28);
 }
 
-function summarizeOpportunity(opportunity: OpportunityAnalysis): string {
+function summarizeOpportunity(opportunity: OpportunityAnalysis, issue: MatchedIssue): string {
   const strongest = Object.entries(opportunity.breakdown).sort((left, right) => right[1] - left[1])[0];
 
   const weakest = Object.entries(opportunity.breakdown).sort((left, right) => left[1] - right[1])[0];
@@ -95,7 +101,9 @@ function summarizeOpportunity(opportunity: OpportunityAnalysis): string {
     return 'Opportunity score is based on repository fit and issue freshness.';
   }
 
-  return `Strongest signal: ${strongest[0]} (${strongest[1]}). Main risk: ${weakest[0]} (${weakest[1]}).`;
+  const claimRisk = issue.claimAssessment?.status;
+  const claimSummary = claimRisk && claimRisk !== 'none' ? ` Claim risk: ${claimRisk}.` : '';
+  return `Strongest signal: ${strongest[0]} (${strongest[1]}). Main risk: ${weakest[0]} (${weakest[1]}).${claimSummary}`;
 }
 
 function normalizeLabel(label: string): string {
@@ -139,7 +147,9 @@ function computeRiskPenalty(issue: MatchedIssue): number {
     penalty += 16;
   }
 
-  return Math.min(45, penalty);
+  penalty += CLAIM_RISK_PENALTIES[issue.claimAssessment?.status ?? 'none'];
+
+  return Math.min(60, penalty);
 }
 
 export class OpportunityService {
@@ -177,7 +187,7 @@ export class OpportunityService {
           },
         };
 
-        opportunity.summary = summarizeOpportunity(opportunity);
+        opportunity.summary = summarizeOpportunity(opportunity, issue);
 
         return {
           ...issue,

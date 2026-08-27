@@ -26,6 +26,8 @@ export const IssueMatchSchema = z.object({
   coreDemand: nonEmptyTrimmedString,
   techRequirements: z.array(trimmedString).default([]).transform(dedupeStrings),
   estimatedWorkload: nonEmptyTrimmedString,
+  claimStatus: z.enum(['none', 'possible', 'likely', 'claimed']).default('none'),
+  claimEvidence: trimmedString.default(''),
 });
 
 export const IssueMatchListSchema = z.object({

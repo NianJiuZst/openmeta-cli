@@ -1667,6 +1667,9 @@ export class AgentOrchestrator {
             `overall ${issue.opportunity.overallScore}`,
             `match ${issue.matchScore}`,
             `opportunity ${issue.opportunity.score}`,
+            ...(issue.claimAssessment?.status && issue.claimAssessment.status !== 'none'
+              ? [`claim ${issue.claimAssessment.status}`]
+              : []),
             ...(hint ? [`feasibility ${hint.level}`] : []),
             `stars ${issue.repoStars}`,
           ],
@@ -1674,6 +1677,7 @@ export class AgentOrchestrator {
             `Labels: ${issue.labels.join(', ') || 'none'}`,
             `Tech: ${issue.analysis.techRequirements.join(', ') || 'n/a'}`,
             `Workload: ${issue.analysis.estimatedWorkload || 'n/a'}`,
+            ...(issue.claimAssessment?.evidence[0] ? [`Claim evidence: ${issue.claimAssessment.evidence[0]}`] : []),
             ...(hint
               ? [
                   `Feasibility: ${hint.level} (${hint.issueScope}, ${hint.scoreAdjustment >= 0 ? '+' : ''}${hint.scoreAdjustment})`,
@@ -1699,6 +1703,12 @@ export class AgentOrchestrator {
       lines: [
         `Repository: ${issue.repoFullName}`,
         `Summary: ${issue.opportunity.summary}`,
+        ...(issue.claimAssessment
+          ? [
+              `Claim risk: ${issue.claimAssessment.status}`,
+              ...(issue.claimAssessment.evidence[0] ? [`Claim evidence: ${issue.claimAssessment.evidence[0]}`] : []),
+            ]
+          : []),
         ...(issue.scoutFeasibility
           ? [
               `Scout feasibility: ${issue.scoutFeasibility.level} (${issue.scoutFeasibility.issueScope}, adjusted ${issue.scoutFeasibility.adjustedOverallScore})`,

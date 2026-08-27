@@ -4,7 +4,7 @@ import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { ensureDirectory, getOpenMetaStateDir, parseGitHubRepoFullName } from '../infra/index.js';
 import { logger } from '../infra/logger.js';
-import type { GitHubIssue } from '../types/index.js';
+import type { GitHubIssue, GitHubIssueComment, IssueClaimAssessment, IssueClaimStatus } from '../types/index.js';
 
 const FILTER_LABEL_GROUPS = [
   ['good first issue', 'good-first-issue'],
@@ -19,6 +19,10 @@ const ACTION_BLOCKING_LABELS = [
   'question',
   'discussion',
   'wontfix',
+  'claimed',
+  'assigned',
+  'in progress',
+  'work in progress',
 ] as const;
 const SEARCH_RESULTS_PER_PAGE = 30;
 const SEARCH_CACHE_TTL_MS = 10 * 60 * 1000;
@@ -28,6 +32,21 @@ const SEARCH_PAGE_PACING_DELAY_MS = 3_000;
 const RATE_LIMIT_RETRY_FALLBACK_DELAY_MS = 10_000;
 const MAX_ISSUES_PER_REPO = 3;
 export const DEFAULT_MIN_REPO_STARS = 50;
+const MAX_RECENT_ISSUE_COMMENTS = 5;
+const CLAIM_LOOKBACK_DAYS = 180;
+
+const SELF_CLAIM_PATTERNS = [
+  /\bi(?:'d| would) like to (?:work on|take|handle|pick up) this\b/i,
+  /\bcan i (?:work on|take|handle|pick up) this\b/i,
+  /\bplease assign (?:this |the )?(?:issue )?to me\b/i,
+  /\bi(?:'ll| will) (?:work on|take|handle|pick up) this\b/i,
+  /\bi(?:'m| am) (?:currently )?working on this\b/i,
+];
+const MAINTAINER_CLAIM_PATTERNS = [
+  /\bassign(?:ed|ing)? (?:this |the )?(?:issue )?to @?[a-z0-9-]+\b/i,
+  /@[a-z0-9-]+[^\n]{0,80}\b(?:go ahead|you can (?:work on|take|handle) this)\b/i,
+];
+const MAINTAINER_ASSOCIATIONS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
 
 type SearchIssueItem = RestEndpointMethodTypes['search']['issuesAndPullRequests']['response']['data']['items'][number];
 
@@ -65,6 +84,11 @@ interface IssueDiscoveryOptions {
 export interface RepositoryStarRange {
   minStars: number;
   maxStars?: number;
+}
+
+export interface IssueClaimContext {
+  recentComments: GitHubIssueComment[];
+  claimAssessment: IssueClaimAssessment;
 }
 
 export interface RepositoryProbe {
@@ -317,6 +341,58 @@ export class GitHubService {
     };
   }
 
+  async fetchIssueClaimContext(repoFullName: string, issueNumber: number): Promise<IssueClaimContext> {
+    if (!this.octokit) {
+      throw new Error('GitHub service not initialized');
+    }
+
+    const normalizedRepo = parseGitHubRepoFullName(repoFullName);
+    const [owner, repo] = normalizedRepo.split('/');
+    if (!owner || !repo) {
+      throw new Error(`Invalid GitHub repository reference: ${repoFullName}`);
+    }
+
+    const checkedAt = new Date().toISOString();
+    try {
+      const response = await this.octokit.rest.issues.listComments({
+        owner,
+        repo,
+        issue_number: issueNumber,
+        per_page: 30,
+        sort: 'created',
+        direction: 'desc',
+      });
+      const comments = response.data.flatMap((comment): GitHubIssueComment[] => {
+        const body = comment.body?.trim() ?? '';
+        const author = comment.user?.login ?? '';
+        if (!body || !author || comment.user?.type === 'Bot' || author.endsWith('[bot]')) {
+          return [];
+        }
+        return [
+          {
+            author,
+            authorAssociation: comment.author_association ?? 'NONE',
+            body,
+            createdAt: comment.created_at,
+            htmlUrl: comment.html_url,
+          },
+        ];
+      });
+      const activeComments = comments.filter((comment) => this.isWithinClaimLookback(comment.createdAt, checkedAt));
+
+      return {
+        recentComments: activeComments.slice(0, MAX_RECENT_ISSUE_COMMENTS),
+        claimAssessment: this.assessClaimSignals(activeComments, checkedAt),
+      };
+    } catch (error) {
+      logger.debug(`Unable to load issue comments for ${normalizedRepo}#${issueNumber}`, error);
+      return {
+        recentComments: [],
+        claimAssessment: { status: 'none', evidence: [], checkedAt },
+      };
+    }
+  }
+
   async fetchRepositoryProbe(repoFullName: string): Promise<RepositoryProbe> {
     if (!this.octokit) {
       throw new Error('GitHub service not initialized');
@@ -398,6 +474,47 @@ export class GitHubService {
       (issue) =>
         issue.repoStars >= range.minStars && (range.maxStars === undefined || issue.repoStars <= range.maxStars),
     );
+  }
+
+  private assessClaimSignals(comments: GitHubIssueComment[], checkedAt: string): IssueClaimAssessment {
+    let status: IssueClaimStatus = 'none';
+    const evidence: string[] = [];
+    const checkedAtMs = new Date(checkedAt).getTime();
+
+    for (const comment of comments) {
+      const createdAtMs = new Date(comment.createdAt).getTime();
+      const ageDays = Number.isFinite(createdAtMs) ? (checkedAtMs - createdAtMs) / (24 * 60 * 60 * 1000) : 0;
+
+      const maintainerClaim =
+        MAINTAINER_ASSOCIATIONS.has(comment.authorAssociation.toUpperCase()) &&
+        MAINTAINER_CLAIM_PATTERNS.some((pattern) => pattern.test(comment.body));
+      const selfClaim = SELF_CLAIM_PATTERNS.some((pattern) => pattern.test(comment.body));
+      if (!maintainerClaim && !selfClaim) {
+        continue;
+      }
+
+      const candidateStatus: IssueClaimStatus = maintainerClaim ? 'claimed' : ageDays <= 60 ? 'likely' : 'possible';
+      if (this.claimStatusPriority(candidateStatus) > this.claimStatusPriority(status)) {
+        status = candidateStatus;
+      }
+      evidence.push(`${comment.author}: ${comment.body.replace(/\s+/g, ' ').slice(0, 180)}`);
+    }
+
+    return { status, evidence: evidence.slice(0, 3), checkedAt };
+  }
+
+  private claimStatusPriority(status: IssueClaimStatus): number {
+    return { none: 0, possible: 1, likely: 2, claimed: 3 }[status];
+  }
+
+  private isWithinClaimLookback(createdAt: string, checkedAt: string): boolean {
+    const createdAtMs = new Date(createdAt).getTime();
+    const checkedAtMs = new Date(checkedAt).getTime();
+    if (!Number.isFinite(createdAtMs) || !Number.isFinite(checkedAtMs)) {
+      return true;
+    }
+    const ageDays = (checkedAtMs - createdAtMs) / (24 * 60 * 60 * 1000);
+    return ageDays <= CLAIM_LOOKBACK_DAYS;
   }
 
   private async fetchRepoTextFile(owner: string, repo: string, path: string): Promise<string | null> {

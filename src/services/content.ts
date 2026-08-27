@@ -258,6 +258,8 @@ export class ContentService {
       `- Technical Match: ${issue.matchScore}/100`,
       `- Opportunity Score: ${issue.opportunity.score}/100`,
       `- Summary: ${issue.opportunity.summary}`,
+      `- Claim Risk: ${issue.claimAssessment?.status ?? 'not checked'}`,
+      ...(issue.claimAssessment?.evidence.map((evidence) => `- Claim Evidence: ${evidence}`) ?? []),
       '',
       '## Breakdown',
       '',

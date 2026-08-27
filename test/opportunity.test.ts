@@ -67,4 +67,28 @@ describe('opportunityService', () => {
       ranked[0]?.opportunity.breakdown.onboardingClarity ?? 0,
     );
   });
+
+  test('penalizes issues whose conversation indicates someone already claimed the work', () => {
+    const available = createMatchedIssue({
+      number: 20,
+      updatedAt: new Date().toISOString(),
+      repoStars: 200,
+      matchScore: 84,
+    });
+    const claimed = createMatchedIssue({
+      ...available,
+      number: 21,
+      claimAssessment: {
+        status: 'claimed',
+        evidence: ['maintainer: Assigned this issue to @alice.'],
+        checkedAt: new Date().toISOString(),
+      },
+    });
+
+    const ranked = opportunityService.rankIssues([claimed, available]);
+
+    expect(ranked[0]?.number).toBe(20);
+    expect(ranked[1]?.opportunity.summary).toContain('Claim risk: claimed');
+    expect(ranked[0]?.opportunity.overallScore).toBeGreaterThan(ranked[1]?.opportunity.overallScore ?? 0);
+  });
 });

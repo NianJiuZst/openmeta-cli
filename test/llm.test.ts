@@ -840,14 +840,18 @@ describe('LLMService issue scoring response parsing', () => {
               "score": 100,
               "coreDemand": "Add accessible labels",
               "techRequirements": ["react", "typescript", "accessibility"],
-              "estimatedWorkload": "1-2 hours"
+              "estimatedWorkload": "1-2 hours",
+              "claimStatus": "claimed",
+              "claimEvidence": ""
             },
             {
               "issueReference": "acme/web#7",
               "score": 61,
               "coreDemand": "Improve documentation clarity",
               "techRequirements": ["markdown", "docs"],
-              "estimatedWorkload": "30 minutes"
+              "estimatedWorkload": "30 minutes",
+              "claimStatus": "likely",
+              "claimEvidence": "alice said she is working on this"
             },
             {
               "issueReference": "acme/ignored#11",
@@ -867,9 +871,12 @@ describe('LLMService issue scoring response parsing', () => {
     expect(parsed.data).toHaveLength(2);
     expect(parsed.data[0]?.repoFullName).toBe('acme/demo');
     expect(parsed.data[0]?.matchScore).toBe(100);
+    expect(parsed.data[0]?.claimAssessment?.status).toBe('none');
     expect(parsed.data[0]?.analysis.techRequirements).toEqual(['react', 'typescript', 'accessibility']);
     expect(parsed.data[1]?.repoFullName).toBe('acme/web');
     expect(parsed.data[1]?.analysis.estimatedWorkload).toBe('30 minutes');
+    expect(parsed.data[1]?.claimAssessment?.status).toBe('likely');
+    expect(parsed.data[1]?.claimAssessment?.evidence[0]).toContain('alice said she is working on this');
   });
 });
 

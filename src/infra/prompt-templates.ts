@@ -10,7 +10,9 @@ Requirements:
 5. Only include issues with score >= 60
 6. Use the exact issue reference shown in the input for every matched issue
 7. Do not invent issues or references that are not in the input
-8. Return one valid JSON object only. No markdown. No commentary.
+8. Inspect recent issue comments for evidence that someone has claimed or started the work
+9. claimStatus must be none, possible, likely, or claimed; cite one concise comment-based reason in claimEvidence
+10. Return one valid JSON object only. No markdown. No commentary.
 
 Output schema:
 {
@@ -24,7 +26,9 @@ Output schema:
         "score": 84,
         "coreDemand": "one sentence",
         "techRequirements": ["typescript", "react"],
-        "estimatedWorkload": "1-2 hours"
+        "estimatedWorkload": "1-2 hours",
+        "claimStatus": "none",
+        "claimEvidence": ""
       }
     ]
   }
@@ -48,7 +52,9 @@ Required schema:
         "score": 84,
         "coreDemand": "one sentence",
         "techRequirements": ["typescript", "react"],
-        "estimatedWorkload": "1-2 hours"
+        "estimatedWorkload": "1-2 hours",
+        "claimStatus": "none" | "possible" | "likely" | "claimed",
+        "claimEvidence": "one concise reason or empty string"
       }
     ]
   }

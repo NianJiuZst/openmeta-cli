@@ -35,6 +35,8 @@ import type {
   EnvironmentInfo,
   GitHubIssue,
   ImplementationDraft,
+  IssueClaimAssessment,
+  IssueClaimStatus,
   LLMProvider,
   LLMReasoningEffort,
   MatchedIssue,
@@ -153,7 +155,17 @@ Title: ${i.title}
 Body: ${i.body.slice(0, 500)}
 Labels: ${i.labels.join(', ')}
 Repo Description: ${i.repoDescription}
-Repo Stars: ${i.repoStars}`,
+Repo Stars: ${i.repoStars}
+Rule-based Claim Signal: ${i.claimAssessment?.status ?? 'not_checked'}
+Recent Comments:
+${
+  i.recentComments
+    ?.map(
+      (comment) =>
+        `- ${comment.author} (${comment.authorAssociation}, ${comment.createdAt}): ${comment.body.replace(/\s+/g, ' ').slice(0, 400)}`,
+    )
+    .join('\n') || '- No recent comments loaded.'
+}`,
       )
       .join('\n\n---\n\n');
 
@@ -443,6 +455,7 @@ Repo Stars: ${i.repoStars}`,
             {
               ...issue,
               matchScore: match.score,
+              claimAssessment: this.mergeClaimAssessment(issue.claimAssessment, match.claimStatus, match.claimEvidence),
               analysis: {
                 coreDemand: match.coreDemand,
                 techRequirements: match.techRequirements,
@@ -452,6 +465,24 @@ Repo Stars: ${i.repoStars}`,
             },
           ];
         }),
+    };
+  }
+
+  private mergeClaimAssessment(
+    existing: IssueClaimAssessment | undefined,
+    llmStatus: IssueClaimStatus,
+    llmEvidence: string,
+  ): IssueClaimAssessment {
+    const priority: Record<IssueClaimStatus, number> = { none: 0, possible: 1, likely: 2, claimed: 3 };
+    const evidencedLlmStatus = llmEvidence.trim() ? llmStatus : 'none';
+    const status =
+      existing && priority[existing.status] >= priority[evidencedLlmStatus] ? existing.status : evidencedLlmStatus;
+    const evidence = [...(existing?.evidence ?? []), ...(llmEvidence.trim() ? [`LLM: ${llmEvidence.trim()}`] : [])];
+
+    return {
+      status,
+      evidence: [...new Set(evidence)].slice(0, 4),
+      checkedAt: existing?.checkedAt ?? new Date().toISOString(),
     };
   }
 
