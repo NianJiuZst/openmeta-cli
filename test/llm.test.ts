@@ -3,7 +3,13 @@ import type { StructuredOutputStatus } from '../src/contracts/index.js';
 import { contextAssemblerService } from '../src/services/context-assembler.js';
 import { LLMService } from '../src/services/llm.js';
 import type { ImplementationDraft, MatchedIssue } from '../src/types/index.js';
-import { createIssue, createMemory, createPatchDraft, createRankedIssue, createWorkspace } from './helpers/factories.js';
+import {
+  createIssue,
+  createMemory,
+  createPatchDraft,
+  createRankedIssue,
+  createWorkspace,
+} from './helpers/factories.js';
 
 interface LLMServiceInternals {
   validateConnection(): Promise<boolean>;

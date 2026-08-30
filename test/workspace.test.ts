@@ -283,7 +283,11 @@ describe('workspaceService.detectTestCommands', () => {
         expect(workspace.testCommands.map((command) => command.command)).toContain('bun run test');
         expect(workspace.contributionRules?.detectedFiles).toContain('CONTRIBUTING.md');
         expect(workspace.contributionRules?.prTemplatePath).toBe('.github/PULL_REQUEST_TEMPLATE.md');
-        expect(workspace.contributionRules?.requiredChecklistItems).toEqual(['Linked issue', 'Test plan', 'Release note']);
+        expect(workspace.contributionRules?.requiredChecklistItems).toEqual([
+          'Linked issue',
+          'Test plan',
+          'Release note',
+        ]);
         expect(workspace.contributionRules?.requiresIssueLinking).toBe(true);
         expect(workspace.contributionRules?.requiresReleaseNotes).toBe(true);
         expect(workspace.contributionRules?.requiresPassingValidation).toBe(true);

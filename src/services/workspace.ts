@@ -8,9 +8,9 @@ import type {
   GeneratedFileChange,
   PermissionDecision,
   RankedIssue,
-  RepositoryContributionRules,
   RepoFileSnippet,
   RepoMemory,
+  RepositoryContributionRules,
   RepoWorkspaceContext,
   TestCommand,
   TestResult,
@@ -537,10 +537,9 @@ export class WorkspaceService {
 
   private detectContributionRules(workspacePath: string): RepositoryContributionRules | undefined {
     const discoveredFiles = this.discoverFiles(workspacePath);
-    const contributionRuleFiles = [...new Set(discoveredFiles.filter((path) => this.isContributionRuleFile(path)))].slice(
-      0,
-      24,
-    );
+    const contributionRuleFiles = [
+      ...new Set(discoveredFiles.filter((path) => this.isContributionRuleFile(path))),
+    ].slice(0, 24);
 
     if (contributionRuleFiles.length === 0) {
       return undefined;
@@ -680,7 +679,8 @@ export class WorkspaceService {
       normalized.startsWith('.github/pull_request_template/') ||
       normalized === '.github/issue_template.md' ||
       normalized.startsWith('.github/issue_template/') ||
-      (isDocLike && (normalized.includes('release') || normalized.includes('changelog') || normalized.includes('commit')))
+      (isDocLike &&
+        (normalized.includes('release') || normalized.includes('changelog') || normalized.includes('commit')))
     );
   }
 

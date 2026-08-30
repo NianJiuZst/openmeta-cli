@@ -3057,6 +3057,12 @@ export class AgentOrchestrator {
 
     if (prDecision.outcome !== 'allow') {
       logger.warn(`Skipping real draft PR creation: ${prDecision.reason}`);
+      return {
+        changedFiles: input.changedFiles,
+        validationResults: input.validationResults,
+      };
+    }
+
     const unsatisfiedContributionRules = this.evaluateUnsatisfiedContributionRules(
       input.workspace,
       hasBlockingValidationFailures,

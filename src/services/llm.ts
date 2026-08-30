@@ -39,9 +39,9 @@ import type {
   LLMReasoningEffort,
   MatchedIssue,
   RankedIssue,
-  RepositoryContributionRules,
   RepoFileSnippet,
   RepoMemory,
+  RepositoryContributionRules,
   RepoWorkspaceContext,
   TestResult,
   UserProfile,
@@ -583,8 +583,12 @@ Repo Stars: ${i.repoStars}`,
     }
 
     const checklist =
-      rules.requiredChecklistItems.length > 0 ? rules.requiredChecklistItems.map((item) => `- ${item}`).join('\n') : '- none';
-    const template = rules.prTemplate ? `\nPR Template (${rules.prTemplatePath || 'detected'}):\n${rules.prTemplate}` : '';
+      rules.requiredChecklistItems.length > 0
+        ? rules.requiredChecklistItems.map((item) => `- ${item}`).join('\n')
+        : '- none';
+    const template = rules.prTemplate
+      ? `\nPR Template (${rules.prTemplatePath || 'detected'}):\n${rules.prTemplate}`
+      : '';
 
     return [
       `Detected Rule Files: ${rules.detectedFiles.join(', ') || 'none'}`,
