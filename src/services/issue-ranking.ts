@@ -139,13 +139,26 @@ export class IssueRankingService {
 
     for (let start = 0; start < issuesToScore.length; start += ISSUE_SCORING_BATCH_SIZE) {
       const batch = issuesToScore.slice(start, start + ISSUE_SCORING_BATCH_SIZE);
-      const scoredBatch = await llmService.scoreIssues(userProfile, batch);
-      if (scoredBatch.status !== 'success') {
-        logger.warn(
-          'Issue scoring returned advisory results that require review. Continuing with the parsed matches only.',
-        );
+      try {
+        const scoredBatch = await llmService.scoreIssues(userProfile, batch);
+        if (scoredBatch.status !== 'success') {
+          logger.warn(
+            scoredBatch.data.length > 0
+              ? 'Issue scoring returned advisory results that require review. Continuing with the parsed matches only.'
+              : 'Issue scoring could not produce usable matches. Continuing with local profile matching for this batch.',
+          );
+        }
+
+        if (scoredBatch.data.length > 0 || scoredBatch.status === 'success') {
+          matches.push(...scoredBatch.data);
+          continue;
+        }
+      } catch (error) {
+        logger.warn('Issue scoring is temporarily unavailable. Continuing with local profile matching for this batch.');
+        logger.debug('Issue scoring batch failed', error);
       }
-      matches.push(...scoredBatch.data);
+
+      matches.push(...this.buildLocalIssueMatches(batch, userProfile).filter((match) => match.matchScore >= 60));
     }
 
     return matches;

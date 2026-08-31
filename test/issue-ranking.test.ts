@@ -140,6 +140,89 @@ describe('IssueRankingService', () => {
     }
   });
 
+  test('uses local profile matching when an LLM scoring batch fails', async () => {
+    const originalScoreIssues = llmService.scoreIssues;
+    const issues = Array.from({ length: 21 }, (_, index) =>
+      createIssue({
+        id: index + 1,
+        number: index + 1,
+        repoFullName: `acme/react-${index + 1}`,
+        repoName: `react-${index + 1}`,
+        title: `Fix React keyboard focus ${index + 1}`,
+        body: 'The TypeScript component has clear reproduction steps and an expected accessibility behavior.',
+        labels: ['good first issue', 'accessibility'],
+        repoDescription: 'TypeScript React component library',
+      }),
+    );
+    let callCount = 0;
+
+    try {
+      llmService.scoreIssues = async (_profile, batch) => {
+        callCount += 1;
+        if (callCount === 2) {
+          throw new Error('provider timeout');
+        }
+
+        return {
+          version: '1',
+          kind: 'issue_match_list',
+          status: 'success',
+          data: batch.map((issue) => createMatchedIssue({ ...issue, matchScore: 75 })),
+        };
+      };
+
+      const matches = await issueRankingService.scoreIssuesInBatches(
+        {
+          techStack: ['TypeScript', 'React'],
+          proficiency: 'intermediate',
+          focusAreas: ['web-dev'],
+        },
+        issues,
+      );
+
+      expect(matches).toHaveLength(21);
+      expect(matches.find((match) => match.number === 21)?.analysis.solutionSuggestion).toContain(
+        'shortlist this issue heuristically',
+      );
+    } finally {
+      llmService.scoreIssues = originalScoreIssues;
+    }
+  });
+
+  test('uses local profile matching for an empty advisory scoring result', async () => {
+    const originalScoreIssues = llmService.scoreIssues;
+
+    try {
+      llmService.scoreIssues = async () => ({
+        version: '1',
+        kind: 'issue_match_list',
+        status: 'needs_review',
+        data: [],
+      });
+
+      const matches = await issueRankingService.scoreIssuesInBatches(
+        {
+          techStack: ['TypeScript', 'React'],
+          proficiency: 'intermediate',
+          focusAreas: ['web-dev'],
+        },
+        [
+          createIssue({
+            title: 'Fix React keyboard focus',
+            body: 'The TypeScript component has clear reproduction steps and expected behavior.',
+            labels: ['good first issue'],
+            repoDescription: 'TypeScript React components',
+          }),
+        ],
+      );
+
+      expect(matches).toHaveLength(1);
+      expect(matches[0]?.analysis.solutionSuggestion).toContain('shortlist this issue heuristically');
+    } finally {
+      llmService.scoreIssues = originalScoreIssues;
+    }
+  });
+
   test('builds local heuristic issue matches without LLM scoring', () => {
     const matches = issueRankingService.buildLocalIssueMatches(
       [
