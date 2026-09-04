@@ -3,7 +3,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import type { PullRequestDraft } from '../contracts/index.js';
 import { logger } from '../infra/index.js';
-import type { RankedIssue } from '../types/index.js';
+import type { RankedIssue, RepositoryContributionRules } from '../types/index.js';
 import { contentService } from './content.js';
 import { githubService } from './github.js';
 
@@ -24,6 +24,7 @@ export interface ContributionPrSubmissionInput {
   prDraft: PullRequestDraft;
   workspacePath: string;
   changedFiles: string[];
+  contributionRules?: RepositoryContributionRules;
 }
 
 export interface ContributionPrSubmissionResult {
@@ -42,9 +43,9 @@ export class ContributionPrService {
   async submitDraftPullRequest(input: ContributionPrSubmissionInput): Promise<ContributionPrSubmissionResult> {
     const upstreamRepo = await this.getUpstreamRepositoryContext(input.issue);
     const forkRepo = await this.ensureForkRepository(upstreamRepo);
-    const branchName = this.buildPublishBranchName(input.issue);
-    const draftPullRequest = this.buildDraftPullRequest(input.prDraft);
-    const commitMessage = this.buildContributionCommitMessage(input.issue);
+    const branchName = this.buildPublishBranchName(input.issue, input.contributionRules);
+    const draftPullRequest = this.buildDraftPullRequest(input.prDraft, input.issue, input.contributionRules);
+    const commitMessage = this.buildContributionCommitMessage(input.issue, input.contributionRules);
 
     await this.createCommitOnFork({
       forkRepo,
@@ -68,25 +69,71 @@ export class ContributionPrService {
     };
   }
 
-  buildDraftPullRequest(prDraft: PullRequestDraft): DraftPullRequest {
+  buildDraftPullRequest(
+    prDraft: PullRequestDraft,
+    issue?: RankedIssue,
+    contributionRules?: RepositoryContributionRules,
+  ): DraftPullRequest {
+    const generatedBody = contentService.formatPullRequestDraftBody(prDraft);
+    const templateBody = contributionRules?.prTemplate?.trim();
+    const issueLinkLine = issue ? `Closes ${issue.repoFullName}#${issue.number}` : undefined;
+    const releaseNoteLine = contributionRules?.requiresReleaseNotes
+      ? 'Release Notes: include a brief summary of the user-visible change.'
+      : undefined;
+
+    const body = templateBody
+      ? [templateBody, '', '---', '', issueLinkLine, releaseNoteLine, generatedBody].filter(Boolean).join('\n')
+      : [issueLinkLine, releaseNoteLine, generatedBody].filter(Boolean).join('\n\n');
+
     return {
       title: prDraft.title,
-      body: contentService.formatPullRequestDraftBody(prDraft),
+      body,
     };
   }
 
-  buildPublishBranchName(issue: RankedIssue): string {
+  buildPublishBranchName(issue: RankedIssue, contributionRules?: RepositoryContributionRules): string {
+    const prefix = this.resolveBranchPrefix(contributionRules);
     const slug = issue.title
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '')
       .slice(0, 32);
 
-    return `openmeta/agent-${issue.number}-${slug || 'issue'}-${Date.now()}`;
+    return `${prefix}${issue.number}-${slug || 'issue'}-${Date.now()}`;
   }
 
-  buildContributionCommitMessage(issue: RankedIssue): string {
-    return `feat: address ${issue.repoFullName}#${issue.number} ${issue.title}`.slice(0, 120);
+  buildContributionCommitMessage(issue: RankedIssue, contributionRules?: RepositoryContributionRules): string {
+    if (this.requiresConventionalCommit(contributionRules)) {
+      return `feat: address ${issue.repoFullName}#${issue.number} ${issue.title}`.slice(0, 120);
+    }
+
+    return `address ${issue.repoFullName}#${issue.number}: ${issue.title}`.slice(0, 120);
+  }
+
+  private resolveBranchPrefix(contributionRules?: RepositoryContributionRules): string {
+    const rules = contributionRules?.branchNamingRules.join(' ').toLowerCase() || '';
+    if (rules.includes('feature/')) {
+      return 'feature/';
+    }
+
+    if (rules.includes('bugfix/')) {
+      return 'bugfix/';
+    }
+
+    if (rules.includes('fix/')) {
+      return 'fix/';
+    }
+
+    return 'openmeta/agent-';
+  }
+
+  private requiresConventionalCommit(contributionRules?: RepositoryContributionRules): boolean {
+    const rules = contributionRules?.commitMessageRules.join(' ').toLowerCase() || '';
+    if (!rules) {
+      return true;
+    }
+
+    return /conventional|type\(scope\):|feat:|fix:|chore:|docs:/.test(rules);
   }
 
   private async getUpstreamRepositoryContext(issue: RankedIssue): Promise<ContributionRepositoryContext> {

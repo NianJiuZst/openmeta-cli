@@ -54,6 +54,41 @@ describe('ContributionPrService', () => {
     expect(commitMessage.length).toBeLessThanOrEqual(120);
   });
 
+  test('applies repository contribution rules to template body, branch prefix, and commit format', () => {
+    const issue = createRankedIssue({
+      repoFullName: 'acme/widgets',
+      number: 42,
+      title: 'Fix keyboard focus in icon-only widgets with an intentionally long title',
+    });
+    const rules = {
+      detectedFiles: ['CONTRIBUTING.md', '.github/PULL_REQUEST_TEMPLATE.md'],
+      sourceSnippets: [],
+      prTemplatePath: '.github/PULL_REQUEST_TEMPLATE.md',
+      prTemplate: '## Summary\n\n- [ ] Linked issue\n- [ ] Test plan',
+      requiredChecklistItems: ['Linked issue', 'Test plan'],
+      prTitleRules: ['PR title should follow feat(scope): summary'],
+      commitMessageRules: ['Commit message should be conventional commits.'],
+      branchNamingRules: ['Branch name should use feature/<ticket>-slug'],
+      requiredValidationRules: [],
+      issueLinkingRules: ['PR must include linked issue'],
+      releaseNoteRules: [],
+      requiresPriorDiscussion: false,
+      requiresIssueLinking: true,
+      requiresReleaseNotes: false,
+      requiresPassingValidation: false,
+    };
+
+    const branchName = contributionPrService.buildPublishBranchName(issue, rules);
+    const commitMessage = contributionPrService.buildContributionCommitMessage(issue, rules);
+    const pullRequest = contributionPrService.buildDraftPullRequest(createPullRequestDraft(), issue, rules);
+
+    expect(branchName).toMatch(/^feature\/42-fix-keyboard-focus-in-icon-only-+\d+$/);
+    expect(commitMessage).toStartWith('feat: address acme/widgets#42 Fix keyboard focus');
+    expect(pullRequest.body).toContain('## Summary');
+    expect(pullRequest.body).toContain('- [ ] Linked issue');
+    expect(pullRequest.body).toContain('Closes acme/widgets#42');
+  });
+
   test('submits a draft PR against an existing fork and reuses an open PR when present', async () => {
     const workspacePath = mkdtempSync(join(tmpdir(), 'openmeta-contribution-pr-'));
     tempDirs.push(workspacePath);

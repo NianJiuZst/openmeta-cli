@@ -37,6 +37,8 @@ describe('contentService', () => {
     expect(markdown).toContain('- Repo Stars: 240');
     expect(markdown).toContain('- Issue Link: https://github.com/acme/demo/issues/42');
     expect(markdown).toContain('- Labels: good first issue, help wanted');
+    expect(markdown).toContain('## Repository Contribution Rules');
+    expect(markdown).toContain('- Detected Rule Files: none');
     expect(markdown).toContain('- `bun test` | Detected Bun tests | repo-script');
     expect(markdown).toContain('## Runnable Validation Commands');
     expect(markdown).toContain('## Validation Safety Notes');

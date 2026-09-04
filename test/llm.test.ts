@@ -3,7 +3,13 @@ import type { StructuredOutputStatus } from '../src/contracts/index.js';
 import { contextAssemblerService } from '../src/services/context-assembler.js';
 import { LLMService } from '../src/services/llm.js';
 import type { ImplementationDraft, MatchedIssue } from '../src/types/index.js';
-import { createIssue, createMemory, createRankedIssue, createWorkspace } from './helpers/factories.js';
+import {
+  createIssue,
+  createMemory,
+  createPatchDraft,
+  createRankedIssue,
+  createWorkspace,
+} from './helpers/factories.js';
 
 interface LLMServiceInternals {
   validateConnection(): Promise<boolean>;
@@ -33,6 +39,20 @@ interface LLMServiceInternals {
       title: string;
       prPotentialScore: number;
     }>;
+  }>;
+  generatePrDraft(
+    issue: ReturnType<typeof createRankedIssue>,
+    patchDraft: ReturnType<typeof createPatchDraft>,
+    workspace: ReturnType<typeof createWorkspace>,
+  ): Promise<{
+    status: StructuredOutputStatus;
+    data: {
+      title: string;
+      summary: string;
+      changes: string[];
+      validation: string[];
+      risks: string[];
+    };
   }>;
   assessIssueFeasibility(
     issue: ReturnType<typeof createRankedIssue>,
@@ -396,6 +416,75 @@ describe('LLMService issue feasibility assessment', () => {
     expect(payloads[0]?.messages[1]?.content).toContain('GPU: none detected');
     expect(payloads[0]?.messages[1]?.content).toContain('Virtualization: vm=no, type=none');
     expect(payloads[0]?.messages[1]?.content).toContain('Missing Tools: python, nvidia-smi');
+  });
+});
+
+describe('LLMService PR draft generation', () => {
+  test('injects detected repository contribution rules into the PR prompt context', async () => {
+    const service = new LLMService() as unknown as LLMServiceInternals & {
+      initialize(apiKey: string, baseUrl: string, modelName?: string): void;
+    };
+    const payloads: Array<{ messages: Array<{ role: string; content: string }> }> = [];
+
+    service.initialize('sk-test', 'https://api.openai.com/v1', 'gpt-4o-mini');
+    service.client = {
+      chat: {
+        completions: {
+          create: async (payload) => {
+            payloads.push(payload);
+            return {
+              choices: [
+                {
+                  message: {
+                    content: JSON.stringify({
+                      version: '1',
+                      kind: 'pull_request_draft',
+                      status: 'success',
+                      data: {
+                        title: 'feat(button): add aria labels',
+                        summary: 'Align icon-only button behavior with accessibility guidance.',
+                        changes: ['Update button logic'],
+                        validation: ['bun test (pending)'],
+                        risks: [],
+                      },
+                    }),
+                  },
+                },
+              ],
+            };
+          },
+        },
+      },
+    };
+
+    await service.generatePrDraft(
+      createRankedIssue(),
+      createPatchDraft(),
+      createWorkspace({
+        contributionRules: {
+          detectedFiles: ['CONTRIBUTING.md', '.github/PULL_REQUEST_TEMPLATE.md'],
+          sourceSnippets: [],
+          prTemplatePath: '.github/PULL_REQUEST_TEMPLATE.md',
+          prTemplate: '## Summary\n\n- [ ] Linked issue\n- [ ] Tests',
+          requiredChecklistItems: ['Linked issue', 'Tests'],
+          prTitleRules: ['PR title must follow feat(scope): summary'],
+          commitMessageRules: ['Commit must follow Conventional Commits'],
+          branchNamingRules: ['Branch should use feature/<ticket>-slug'],
+          requiredValidationRules: ['Tests must pass before opening a PR'],
+          issueLinkingRules: ['PR must link to an issue'],
+          releaseNoteRules: ['Include release note when behavior changes'],
+          requiresPriorDiscussion: false,
+          requiresIssueLinking: true,
+          requiresReleaseNotes: true,
+          requiresPassingValidation: true,
+        },
+      }),
+    );
+
+    expect(payloads[0]?.messages[1]?.content).toContain('Repository Contribution Rules:');
+    expect(payloads[0]?.messages[1]?.content).toContain('Detected Rule Files: CONTRIBUTING.md');
+    expect(payloads[0]?.messages[1]?.content).toContain('PR Template (.github/PULL_REQUEST_TEMPLATE.md):');
+    expect(payloads[0]?.messages[1]?.content).toContain('Issue Linking Required: yes');
   });
 });
 

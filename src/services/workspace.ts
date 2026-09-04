@@ -10,6 +10,7 @@ import type {
   RankedIssue,
   RepoFileSnippet,
   RepoMemory,
+  RepositoryContributionRules,
   RepoWorkspaceContext,
   TestCommand,
   TestResult,
@@ -24,6 +25,7 @@ const MAX_SNIPPET_CHARS = 8000;
 const MAX_GENERATED_FILES = 6;
 const MAX_GENERATED_FILE_CHARS = 60_000;
 const DEFAULT_EXPANSION_LIMIT = 8;
+const MAX_CONTRIBUTION_RULE_SNIPPET_CHARS = 12_000;
 type ExecutionMode = 'interactive' | 'headless';
 
 function normalizeRepoRelativePath(path: string): string {
@@ -503,6 +505,7 @@ export class WorkspaceService {
     executionMode: ExecutionMode;
   }): Promise<RepoWorkspaceContext> {
     const topLevelFiles = readdirSync(input.workspacePath).slice(0, 50);
+    const contributionRules = this.detectContributionRules(input.workspacePath);
     const snippets = input.candidateFiles.map((path) => ({
       path,
       content: this.readSnippet(join(input.workspacePath, path)),
@@ -521,6 +524,7 @@ export class WorkspaceService {
       workspaceDirty: input.workspaceDirty,
       defaultBranch: input.defaultBranch,
       branchName: input.branchName,
+      contributionRules,
       topLevelFiles,
       candidateFiles: input.candidateFiles,
       snippets,
@@ -529,6 +533,160 @@ export class WorkspaceService {
       validationWarnings,
       testResults,
     };
+  }
+
+  private detectContributionRules(workspacePath: string): RepositoryContributionRules | undefined {
+    const discoveredFiles = this.discoverFiles(workspacePath);
+    const contributionRuleFiles = [
+      ...new Set(discoveredFiles.filter((path) => this.isContributionRuleFile(path))),
+    ].slice(0, 24);
+
+    if (contributionRuleFiles.length === 0) {
+      return undefined;
+    }
+
+    const sourceSnippets: RepositoryContributionRules['sourceSnippets'] = [];
+    const requiredChecklistItems: string[] = [];
+    const prTitleRules: string[] = [];
+    const commitMessageRules: string[] = [];
+    const branchNamingRules: string[] = [];
+    const requiredValidationRules: string[] = [];
+    const issueLinkingRules: string[] = [];
+    const releaseNoteRules: string[] = [];
+    let requiresPriorDiscussion = false;
+    let requiresIssueLinking = false;
+    let requiresReleaseNotes = false;
+    let requiresPassingValidation = false;
+    let prTemplatePath: string | undefined;
+    let prTemplate: string | undefined;
+
+    for (const relativePath of contributionRuleFiles) {
+      const fullPath = join(workspacePath, relativePath);
+      if (!existsSync(fullPath)) {
+        continue;
+      }
+
+      const rawContent = readFileSync(fullPath, 'utf-8');
+      const normalizedContent = rawContent.trim();
+      if (!normalizedContent) {
+        continue;
+      }
+
+      sourceSnippets.push({
+        path: relativePath,
+        excerpt: normalizedContent.slice(0, MAX_CONTRIBUTION_RULE_SNIPPET_CHARS),
+      });
+
+      if (!prTemplatePath && this.isPullRequestTemplatePath(relativePath)) {
+        prTemplatePath = relativePath;
+        prTemplate = normalizedContent.slice(0, MAX_CONTRIBUTION_RULE_SNIPPET_CHARS);
+      }
+
+      const lines = normalizedContent.split(/\r?\n/).map((line) => line.trim());
+      for (const line of lines) {
+        if (!line) {
+          continue;
+        }
+
+        const checklistMatch = line.match(/^- \[(?: |x|X)\]\s+(.+)$/);
+        if (checklistMatch?.[1]) {
+          requiredChecklistItems.push(checklistMatch[1].trim());
+        }
+
+        const loweredLine = line.toLowerCase();
+        if (/(pr title|pull request title|title format|title should|title must)/i.test(line)) {
+          prTitleRules.push(line);
+        }
+
+        if (/(commit message|conventional commit|squash commit|commit format|commit should|commit must)/i.test(line)) {
+          commitMessageRules.push(line);
+        }
+
+        if (/(branch name|branch naming|name your branch|branch should|branch must|branches should)/i.test(line)) {
+          branchNamingRules.push(line);
+        }
+
+        if (/(test|validation|ci|lint|typecheck|build)/i.test(line) && /(must|required|should)/i.test(line)) {
+          requiredValidationRules.push(line);
+        }
+
+        if (
+          /(issue|fixes|closes|resolves|linked issue|link to issue|issue link)/i.test(line) &&
+          /(must|required|should|include|add|needs)/i.test(line)
+        ) {
+          issueLinkingRules.push(line);
+        }
+
+        if (
+          /(release note|release-notes|changelog|breaking change)/i.test(line) &&
+          /(must|required|should|include|add|needs)/i.test(line)
+        ) {
+          releaseNoteRules.push(line);
+        }
+
+        if (
+          /(discuss|discussion|approval|maintainer approval|before opening|before submitting)/i.test(line) &&
+          /(must|required|should|need|first)/i.test(line)
+        ) {
+          requiresPriorDiscussion = true;
+        }
+
+        if (/(fixes|closes|resolves)\s+#\d+/i.test(line) || loweredLine.includes('linked issue')) {
+          requiresIssueLinking = true;
+        }
+
+        if (
+          /(release note|release-notes|changelog|breaking change)/i.test(line) &&
+          /(must|required|need|include|add)/i.test(line)
+        ) {
+          requiresReleaseNotes = true;
+        }
+
+        if (/(test|validation|ci|lint|typecheck|build)/i.test(line) && /(must|required|need|pass)/i.test(line)) {
+          requiresPassingValidation = true;
+        }
+      }
+    }
+
+    return {
+      detectedFiles: contributionRuleFiles,
+      sourceSnippets,
+      prTemplatePath,
+      prTemplate,
+      requiredChecklistItems: [...new Set(requiredChecklistItems)],
+      prTitleRules: [...new Set(prTitleRules)],
+      commitMessageRules: [...new Set(commitMessageRules)],
+      branchNamingRules: [...new Set(branchNamingRules)],
+      requiredValidationRules: [...new Set(requiredValidationRules)],
+      issueLinkingRules: [...new Set(issueLinkingRules)],
+      releaseNoteRules: [...new Set(releaseNoteRules)],
+      requiresPriorDiscussion,
+      requiresIssueLinking,
+      requiresReleaseNotes,
+      requiresPassingValidation,
+    };
+  }
+
+  private isContributionRuleFile(path: string): boolean {
+    const normalized = normalizeRepoRelativePath(path).toLowerCase();
+    const isDocLike = /\.(md|markdown|txt|adoc|rst)$/i.test(normalized);
+    return (
+      normalized === 'contributing.md' ||
+      normalized.endsWith('/contributing.md') ||
+      normalized === 'codeowners' ||
+      normalized.endsWith('/codeowners') ||
+      normalized === '.github/pull_request_template.md' ||
+      normalized.startsWith('.github/pull_request_template/') ||
+      normalized === '.github/issue_template.md' ||
+      normalized.startsWith('.github/issue_template/') ||
+      (isDocLike &&
+        (normalized.includes('release') || normalized.includes('changelog') || normalized.includes('commit')))
+    );
+  }
+
+  private isPullRequestTemplatePath(path: string): boolean {
+    const normalized = normalizeRepoRelativePath(path).toLowerCase();
+    return normalized === '.github/pull_request_template.md' || normalized.startsWith('.github/pull_request_template/');
   }
 
   private async createWorkspaceBranchName(git: SimpleGit, issue: RankedIssue): Promise<string> {

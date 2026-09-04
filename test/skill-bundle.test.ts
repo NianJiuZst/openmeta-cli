@@ -104,6 +104,9 @@ describe('skill bundle rendering', () => {
           cwd: process.cwd(),
           stdio: ['ignore', 'pipe', 'inherit'],
           encoding: 'utf-8',
+          // Windows package managers are .cmd shims, which cannot be launched
+          // directly by execFileSync under Bun.
+          shell: process.platform === 'win32',
         }),
       ) as Array<{ filename: string }>;
       execFileSync('tar', ['-xzf', join(packedRoot, packed[0]!.filename), '-C', packedRoot]);

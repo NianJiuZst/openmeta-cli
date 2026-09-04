@@ -202,7 +202,26 @@ describe('workspaceService.detectTestCommands', () => {
       await seedGit.addConfig('user.name', 'OpenMeta Test');
       await seedGit.addConfig('user.email', 'openmeta@example.com');
       mkdirSync(join(seedPath, 'src'), { recursive: true });
+      mkdirSync(join(seedPath, '.github'), { recursive: true });
       writeFileSync(join(seedPath, 'README.md'), '# Demo\n\nMissing setup notes.\n', 'utf-8');
+      writeFileSync(
+        join(seedPath, 'CONTRIBUTING.md'),
+        [
+          '# Contributing',
+          '',
+          '- PR title must follow `feat(scope): summary`.',
+          '- Commit message must follow Conventional Commits.',
+          '- Branch name should use feature/<ticket>-slug format.',
+          '- PR must include linked issue and release note.',
+          '- Tests must pass before opening a PR.',
+        ].join('\n'),
+        'utf-8',
+      );
+      writeFileSync(
+        join(seedPath, '.github', 'PULL_REQUEST_TEMPLATE.md'),
+        ['## Summary', '', '- [ ] Linked issue', '- [ ] Test plan', '- [ ] Release note'].join('\n'),
+        'utf-8',
+      );
       writeFileSync(
         join(seedPath, 'package.json'),
         JSON.stringify({
@@ -232,6 +251,14 @@ describe('workspaceService.detectTestCommands', () => {
           candidateFiles: string[];
           snippets: Array<{ path: string; content: string }>;
           testCommands: Array<{ command: string }>;
+          contributionRules?: {
+            detectedFiles: string[];
+            prTemplatePath?: string;
+            requiredChecklistItems: string[];
+            requiresIssueLinking: boolean;
+            requiresReleaseNotes: boolean;
+            requiresPassingValidation: boolean;
+          };
         }>;
       };
       const originalBuildRepoUrl = service.buildRepoUrl;
@@ -254,6 +281,16 @@ describe('workspaceService.detectTestCommands', () => {
         expect(workspace.candidateFiles.map(normalizePathForAssertion)).toContain('src/index.ts');
         expect(workspace.snippets.some((snippet) => snippet.path === 'README.md')).toBe(true);
         expect(workspace.testCommands.map((command) => command.command)).toContain('bun run test');
+        expect(workspace.contributionRules?.detectedFiles).toContain('CONTRIBUTING.md');
+        expect(workspace.contributionRules?.prTemplatePath).toBe('.github/PULL_REQUEST_TEMPLATE.md');
+        expect(workspace.contributionRules?.requiredChecklistItems).toEqual([
+          'Linked issue',
+          'Test plan',
+          'Release note',
+        ]);
+        expect(workspace.contributionRules?.requiresIssueLinking).toBe(true);
+        expect(workspace.contributionRules?.requiresReleaseNotes).toBe(true);
+        expect(workspace.contributionRules?.requiresPassingValidation).toBe(true);
       } finally {
         service.buildRepoUrl = originalBuildRepoUrl;
         delete process.env['OPENMETA_HOME'];
